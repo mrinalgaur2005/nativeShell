@@ -42,5 +42,5 @@ void layout_traverse_leaves(LayoutNode *node,
                             void (*fn)(LayoutNode *, void *),
                             void *userdata);
 
-/* Cleanup */
+/* Cleanu}p */
 void layout_destroy(LayoutNode *node);

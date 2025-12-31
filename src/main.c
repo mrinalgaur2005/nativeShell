@@ -1,6 +1,7 @@
-
+#include "focus.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
+#include <SDL2/SDL_keycode.h>
 #include <SDL2/SDL_render.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -38,17 +39,41 @@ int main(void) {
                     break;
 
                 case SDL_KEYDOWN:
-                    if (e.key.keysym.sym == SDLK_v && !v_down ) {
-                        v_down=true;
-                        SDL_Log("Inside v");
-                        focused = layout_split_leaf(
-                            focused,
-                            SPLIT_VERTICAL,
-                            0.5f,
-                            &root 
-                        );
+                    if (e.key.repeat) break;
+
+                    switch (e.key.keysym.sym) {
+
+                        case SDLK_v:
+                            if (!v_down) {
+                                v_down = true;
+                                SDL_Log("Split vertical");
+                                focused = layout_split_leaf(
+                                        focused,
+                                        SPLIT_VERTICAL,
+                                        0.5f,
+                                        &root
+                                        );
+                            }
+                            break;
+
+                        case SDLK_h:
+                            focused = focus_move(root, focused, DIR_LEFT);
+                            break;
+
+                        case SDLK_l:
+                            focused = focus_move(root, focused, DIR_RIGHT);
+                            break;
+
+                        case SDLK_k:
+                            focused = focus_move(root, focused, DIR_UP);
+                            break;
+
+                        case SDLK_j:
+                            focused = focus_move(root, focused, DIR_DOWN);
+                            break;
                     }
                     break;
+
                 case SDL_KEYUP:
                     if (e.key.keysym.sym == SDLK_v) {
                         v_down = false;
@@ -65,7 +90,7 @@ int main(void) {
         SDL_SetRenderDrawColor(ren, 30, 30, 30, 255);
         SDL_RenderClear(ren);
 
-        render_layout(ren, root);
+        render_layout(ren, root,focused);
 
         SDL_RenderPresent(ren);
     }
