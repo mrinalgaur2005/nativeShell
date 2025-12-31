@@ -9,8 +9,12 @@ gcc \
   "$SCRIPT_DIR/src/render.c" \
   "$SCRIPT_DIR/src/window.c" \
   "$SCRIPT_DIR/src/focus.c" \
-  $(pkg-config --cflags --libs sdl2 SDL2_image) \
+  "$SCRIPT_DIR/src/placedholderview.c" \
+  "$SCRIPT_DIR/src/debug_view.c" \
+  "$SCRIPT_DIR/src/view.c" \
+  "$SCRIPT_DIR/src/web_view.c" \
+  $(pkg-config --cflags --libs sdl2 SDL2_image gtk+-3.0 webkit2gtk-4.1) \
   -Wall -Wextra -O2 \
   -o "$SCRIPT_DIR/main"
 
-"$SCRIPT_DIR/main"
+WEBKIT_DISABLE_SANDBOX=1 "$SCRIPT_DIR/main"

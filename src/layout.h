@@ -1,5 +1,6 @@
 
 #pragma once
+#include "view.h"
 #include <SDL2/SDL.h>
 
 typedef enum {
@@ -22,6 +23,7 @@ typedef struct LayoutNode {
     struct LayoutNode *b;
     struct LayoutNode *parent;
 
+    View *view;
     int id;
 } LayoutNode;
 
@@ -33,8 +35,9 @@ LayoutNode *layout_split_leaf(LayoutNode *leaf,
                               float ratio,
                               LayoutNode **root);
 
+LayoutNode *layout_close_leaf(LayoutNode *leaf,LayoutNode **root);
 /* THE IMPORTANT FUNCTION */
-
+LayoutNode *layout_first_leaf(LayoutNode *node);
 void layout_assign(LayoutNode *node, SDL_Rect rect);
 
 /* Traversal */

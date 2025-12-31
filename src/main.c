@@ -3,13 +3,18 @@
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_keycode.h>
 #include <SDL2/SDL_render.h>
+#include <sched.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <unistd.h>
+#include "gtk/gtk.h"
 #include "layout.h"
 #include "render.h"
+#include "web_view.h"
 
 bool v_down = false;
 int main(void) {
+    gtk_init(NULL,NULL);
     SDL_Init(SDL_INIT_VIDEO);
 
     SDL_Window *win = SDL_CreateWindow(
@@ -26,6 +31,7 @@ int main(void) {
     );
 
     LayoutNode *root = layout_leaf(1);
+    root->view=web_view_create("https://www.google.com");
     LayoutNode *focused = root;
 
     bool running = true;
@@ -33,6 +39,42 @@ int main(void) {
 
     while (running) {
         while (SDL_PollEvent(&e)) {
+            
+            if (focused && focused->view) {
+                switch (e.type) {
+                    case SDL_KEYDOWN:
+                        web_view_handle_key(focused->view, &e.key);
+                        break;
+
+                    case SDL_MOUSEBUTTONDOWN:
+                        web_view_handle_mouse(focused->view, &e.button);
+                        break;
+void web_view_handle_key(View *v, SDL_KeyboardEvent *key)
+{
+    (void)v;
+    (void)key;
+    /* TODO: forward to WebKit */
+}
+
+void web_view_handle_mouse(View *v, SDL_MouseButtonEvent *btn)
+{
+    (void)v;
+    (void)btn;
+    /* TODO: forward to WebKit */
+}
+
+void web_view_handle_motion(View *v, SDL_MouseMotionEvent *motion)
+{
+    (void)v;
+    (void)motion;
+    /* TODO: forward to WebKit */
+}
+
+                    case SDL_MOUSEMOTION:
+                        web_view_handle_motion(focused->view, &e.motion);
+                        break;
+                }
+            }
             switch (e.type) {
                 case SDL_QUIT:
                     running = false;
@@ -40,6 +82,9 @@ int main(void) {
 
                 case SDL_KEYDOWN:
                     if (e.key.repeat) break;
+                    if (focused && focused->type != NODE_LEAF) {
+                        focused = layout_first_leaf(focused);
+                    }
 
                     switch (e.key.keysym.sym) {
 
@@ -64,6 +109,9 @@ int main(void) {
                                     );
                             break;
 
+                        case SDLK_x:
+                            focused = layout_close_leaf(focused,&root);
+                            break;
                         case SDLK_h:
                             focused = focus_move(root, focused, DIR_LEFT);
                             break;

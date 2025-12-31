@@ -1,13 +1,19 @@
 
 #include "layout.h"
+#include "debug_view.h"
+#include "placedholderview.h"
 #include <SDL2/SDL_log.h>
+#include <SDL2/SDL_pixels.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <wchar.h>
 
 LayoutNode *layout_leaf(int id) {
     LayoutNode *n = calloc(1, sizeof(LayoutNode));
     n->type = NODE_LEAF;
     n->id = id;
+    SDL_Color color = { 80 + id * 20, 120, 160, 255 };
+    n->view = placeholder_view_create(color);
     return n;
 }
 
@@ -56,6 +62,42 @@ LayoutNode *layout_split_leaf(LayoutNode *leaf,
 
     return new_leaf;
 }
+
+LayoutNode *layout_first_leaf(LayoutNode *node){
+    if (!node) {
+        return NULL;    
+    }
+    if (node->type == NODE_LEAF)
+        return node;
+    return layout_first_leaf(node->a);
+};
+LayoutNode *layout_close_leaf(LayoutNode *leaf, LayoutNode **root)
+{
+    if (!leaf || !leaf->parent)
+        return leaf;
+
+    LayoutNode *split = leaf->parent;
+    LayoutNode *survivor =
+        (split->a == leaf) ? split->b : split->a;
+
+    LayoutNode *grandparent = split->parent;
+
+    if (grandparent) {
+        if (grandparent->a == split)
+            grandparent->a = survivor;
+        else if (grandparent->b == split)
+            grandparent->b = survivor;
+    } else {
+        *root = survivor;
+    }
+
+    survivor->parent = grandparent;
+
+    free(leaf);
+    free(split);
+
+    return survivor;
+}
 void layout_assign(LayoutNode *node, SDL_Rect rect){
     if(!node) return;
     node->rect = rect;
@@ -97,5 +139,6 @@ void layout_destroy(LayoutNode *node) {
     if (!node) return;
     layout_destroy(node->a);
     layout_destroy(node->b);
+    if(node->view)node->view->destroy(node->view);
     free(node);
 }

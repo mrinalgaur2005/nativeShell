@@ -1,32 +1,30 @@
 #include "render.h"
 
+#define BORDER_THIN 1
+#define BORDER_FOCUSED 3
+#define GAP 4  
+
 static void draw_leaf(LayoutNode *node, void *userdata)
 {
     struct {
-        SDL_Renderer *r;
+        SDL_Renderer *renderer;
         LayoutNode *focused;
     } *ctx = userdata;
 
-    SDL_Renderer *r = ctx->r;
+    if (!node->view)
+        return;
 
-    if (node == ctx->focused) {
-        /* Focused: brighter */
-        SDL_SetRenderDrawColor(r, 200, 200, 200, 255);
-    } else {
-        SDL_SetRenderDrawColor(
-            r,
-            (node->id * 70) % 255,
-            (node->id * 130) % 255,
-            (node->id * 200) % 255,
-            255
-        );
-    }
+    /* Clip to leaf rect */
+    SDL_RenderSetClipRect(ctx->renderer, &node->rect);
 
-    SDL_RenderFillRect(r, &node->rect);
+    node->view->draw(
+        node->view,
+        ctx->renderer,
+        node->rect,
+        node == ctx->focused
+    );
 
-    /* Border */
-    SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
-    SDL_RenderDrawRect(r, &node->rect);
+    SDL_RenderSetClipRect(ctx->renderer, NULL);
 }
 
 void render_layout(SDL_Renderer *r, LayoutNode *root, LayoutNode *focused)
