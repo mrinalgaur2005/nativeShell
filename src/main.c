@@ -55,6 +55,14 @@ int main(void) {
                                         );
                             }
                             break;
+                        case SDLK_s:
+                            focused = layout_split_leaf(
+                                    focused,
+                                    SPLIT_HORIZONTAL,
+                                    0.5f,
+                                    &root
+                                    );
+                            break;
 
                         case SDLK_h:
                             focused = focus_move(root, focused, DIR_LEFT);
