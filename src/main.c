@@ -1,8 +1,13 @@
+
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_events.h>
+#include <SDL2/SDL_render.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include "layout.h"
 #include "render.h"
 
+bool v_down = false;
 int main(void) {
     SDL_Init(SDL_INIT_VIDEO);
 
@@ -33,14 +38,22 @@ int main(void) {
                     break;
 
                 case SDL_KEYDOWN:
-                    if (e.key.keysym.sym == SDLK_v) {
+                    if (e.key.keysym.sym == SDLK_v && !v_down ) {
+                        v_down=true;
+                        SDL_Log("Inside v");
                         focused = layout_split_leaf(
                             focused,
                             SPLIT_VERTICAL,
-                            0.5f
+                            0.5f,
+                            &root 
                         );
                     }
                     break;
+                case SDL_KEYUP:
+                    if (e.key.keysym.sym == SDLK_v) {
+                        v_down = false;
+    }
+    break;
             }
         }
 
@@ -49,7 +62,7 @@ int main(void) {
 
         layout_assign(root, (SDL_Rect){0, 0, w, h});
 
-        SDL_SetRenderDrawColor(ren, 15, 15, 15, 255);
+        SDL_SetRenderDrawColor(ren, 30, 30, 30, 255);
         SDL_RenderClear(ren);
 
         render_layout(ren, root);

@@ -20,16 +20,21 @@ typedef struct LayoutNode {
     float ratio;
     struct LayoutNode *a;
     struct LayoutNode *b;
+    struct LayoutNode *parent;
 
     int id;
 } LayoutNode;
 
 /*helpers */
 LayoutNode *layout_leaf(int id);
+LayoutNode *layout_split_node(SplitDirection dir,float ratio);
 LayoutNode *layout_split_leaf(LayoutNode *leaf,
                               SplitDirection dir,
-                              float ratio);
+                              float ratio,
+                              LayoutNode **root);
+
 /* THE IMPORTANT FUNCTION */
+
 void layout_assign(LayoutNode *node, SDL_Rect rect);
 
 /* Traversal */

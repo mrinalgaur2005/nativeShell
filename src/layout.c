@@ -1,5 +1,7 @@
 
 #include "layout.h"
+#include <SDL2/SDL_log.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 LayoutNode *layout_leaf(int id) {
@@ -9,23 +11,50 @@ LayoutNode *layout_leaf(int id) {
     return n;
 }
 
+LayoutNode *layout_split_node(SplitDirection dir,float ratio) {
+    LayoutNode *n = calloc(1, sizeof(LayoutNode));
+    n->type = NODE_SPLIT;
+    n->split=dir;
+    n->ratio=ratio;
+    return n;
+}
 LayoutNode *layout_split_leaf(LayoutNode *leaf,
                               SplitDirection dir,
-                              float ratio)
+                              float ratio,
+                              LayoutNode **root)
 {
-    if (!leaf || leaf->type != NODE_LEAF)
+    if (!leaf || leaf->type != NODE_LEAF) {
+        SDL_Log("Refusing to split non-leaf");
         return leaf;
+    }
 
-    LayoutNode *a = layout_leaf(leaf->id * 2);
-    LayoutNode *b = layout_leaf(leaf->id * 2 + 1);
+    SDL_Log("Inside split leaf");
 
-    leaf->type  = NODE_SPLIT;
-    leaf->split = dir;
-    leaf->ratio = ratio;
-    leaf->a = a;
-    leaf->b = b;
+    /* Save old parent BEFORE modifying anything */
+    LayoutNode *old_parent = leaf->parent;
 
-    return a;  // new focused leaf
+    LayoutNode *split = layout_split_node(dir, ratio);
+    LayoutNode *new_leaf = layout_leaf(leaf->id + 1);
+
+    /* Replace leaf in its old parent */
+    if (old_parent) {
+        if (old_parent->a == leaf) old_parent->a = split;
+        else if (old_parent->b == leaf) old_parent->b = split;
+    }
+
+    /* Root case */
+    if (*root == leaf)
+        *root = split;
+
+    /* Wire new relationships */
+    split->parent = old_parent;
+    split->a = leaf;
+    split->b = new_leaf;
+
+    leaf->parent = split;
+    new_leaf->parent = split;
+
+    return new_leaf;
 }
 void layout_assign(LayoutNode *node, SDL_Rect rect){
     if(!node) return;
@@ -46,6 +75,7 @@ void layout_assign(LayoutNode *node, SDL_Rect rect){
         r2.y+=h1;
         r2.h-=h1;
     }
+
     layout_assign(node->a, r1);
     layout_assign(node->b, r2);
 }
