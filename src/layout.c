@@ -36,23 +36,19 @@ LayoutNode *layout_split_leaf(LayoutNode *leaf,
 
     SDL_Log("Inside split leaf");
 
-    /* Save old parent BEFORE modifying anything */
     LayoutNode *old_parent = leaf->parent;
 
     LayoutNode *split = layout_split_node(dir, ratio);
     LayoutNode *new_leaf = layout_leaf(leaf->id + 1);
 
-    /* Replace leaf in its old parent */
     if (old_parent) {
         if (old_parent->a == leaf) old_parent->a = split;
         else if (old_parent->b == leaf) old_parent->b = split;
     }
 
-    /* Root case */
     if (*root == leaf)
         *root = split;
 
-    /* Wire new relationships */
     split->parent = old_parent;
     split->a = leaf;
     split->b = new_leaf;

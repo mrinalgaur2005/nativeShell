@@ -1,12 +1,17 @@
 #include "web_view.h"
 #include "cairo.h"
 #include "gdk/gdk.h"
+#include "glib-object.h"
 #include "gtk/gtk.h"
+#include <SDL2/SDL_events.h>
+#include <SDL2/SDL_keycode.h>
 #include <SDL2/SDL_log.h>
 #include <SDL2/SDL_render.h>
 #include <SDL2/SDL_stdinc.h>
 #include <webkit2/webkit2.h>
 #include <stdlib.h>
+
+
 typedef struct {
     View base;
     GtkWidget *offscreen;
@@ -18,11 +23,17 @@ typedef struct {
     int height;
 
     SDL_Texture *texture;
-    /* later: offscreen surface, texture, size */
 } WebView;
 
+
+
+static guint sdl_key_to_gdk(SDL_KeyCode key);
 static void web_view_ensure_surface(WebView *wv, int w, int h);
 static void web_view_ensure_texture(WebView *wv,SDL_Renderer *renderer);
+static GdkDevice *get_pointer_device(GtkWidget *widget);
+static GdkDevice *get_keyboard_device(GtkWidget *widget);
+
+static guint guess_hardware_keycode(guint keyval);
 static void draw(View *v,
                  SDL_Renderer *renderer,
                  SDL_Rect rect,
@@ -33,21 +44,17 @@ static void draw(View *v,
 
     web_view_ensure_surface(wv, rect.w, rect.h);
 
-    /* Inform GTK of desired size */
     gtk_widget_set_size_request(wv->offscreen, rect.w, rect.h);
 
-    /* Let GTK process pending layout / paint */
     while (gtk_events_pending()) {
         gtk_main_iteration();
     }
 
-    /* Clear Cairo surface */
     cairo_save(wv->cr);
     cairo_set_operator(wv->cr, CAIRO_OPERATOR_CLEAR);
     cairo_paint(wv->cr);
     cairo_restore(wv->cr);
 
-    /* GTK → Cairo */
     gtk_widget_draw(wv->offscreen, wv->cr);
     cairo_surface_flush(wv->surface);
 
@@ -62,16 +69,9 @@ static void draw(View *v,
             data,
             stride
             );
-    /* Debug pixel check */
-    if (data) {
-        SDL_Log("Cairo pixel ARGB = %02x %02x %02x %02x",
-                data[2], data[1], data[0], data[3]);
-    }
 
-    /* TEMP placeholder until SDL texture upload */
     SDL_RenderCopy(renderer, wv->texture, NULL, &rect);
 
-    /* Optional focus outline */
     if (focused) {
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         SDL_RenderDrawRect(renderer, &rect);
@@ -105,16 +105,24 @@ static void destroy(View *v)
 View *web_view_create(const char *url)
 {
     WebView *wv = calloc(1, sizeof(*wv));
+
+    wv->base.type = VIEW_WEB;
     wv->base.draw = draw;
     wv->base.destroy = destroy;
 
-    wv->offscreen=gtk_offscreen_window_new();
-    gtk_widget_set_size_request(wv->offscreen,800,600);
+    wv->offscreen = gtk_offscreen_window_new();
+    gtk_widget_set_size_request(wv->offscreen, 800, 600);
+
     wv->wk = WEBKIT_WEB_VIEW(webkit_web_view_new());
-    gtk_container_add(GTK_CONTAINER(wv->offscreen),GTK_WIDGET(wv->wk));
+    gtk_container_add(GTK_CONTAINER(wv->offscreen),
+                      GTK_WIDGET(wv->wk));
+
     gtk_widget_show_all(wv->offscreen);
     gtk_widget_realize(wv->offscreen);
+    gtk_widget_set_can_focus(GTK_WIDGET(wv->wk), TRUE);
+    gtk_widget_grab_focus(GTK_WIDGET(wv->wk));
     
+
     webkit_web_view_load_uri(wv->wk, url);
 
     return (View *)wv;
@@ -146,24 +154,229 @@ static void web_view_ensure_surface(WebView *wv, int w, int h)
     wv->surface =
         cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
     wv->cr = cairo_create(wv->surface);
+
 }
+
+
+//dont alter handels key typing
+//doesnt include symbols and clipboard
+//todo: gecko
 void web_view_handle_key(View *v, SDL_KeyboardEvent *key)
 {
-    (void)v;
-    (void)key;
-    /* TODO: forward to WebKit */
+    WebView *wv = (WebView *)v;
+
+    guint keyval = sdl_key_to_gdk(key->keysym.sym);
+    if (!keyval)
+        return;
+
+    GdkWindow *win = gtk_widget_get_window(GTK_WIDGET(wv->wk));
+    GdkDevice *kbd = get_keyboard_device(wv->offscreen);
+    if (!win || !kbd)
+        return;
+
+    GdkEventType type =
+        (key->type == SDL_KEYDOWN) ? GDK_KEY_PRESS : GDK_KEY_RELEASE;
+
+    GdkEvent *ev = gdk_event_new(type);
+
+    ev->key.window = g_object_ref(win);
+    ev->key.send_event = TRUE;
+    ev->key.time = GDK_CURRENT_TIME;
+    ev->key.keyval = keyval;
+
+    ev->key.hardware_keycode = guess_hardware_keycode(keyval);
+
+    ev->key.state =
+        (key->keysym.mod & KMOD_SHIFT ? GDK_SHIFT_MASK : 0) |
+        (key->keysym.mod & KMOD_CTRL  ? GDK_CONTROL_MASK : 0) |
+        (key->keysym.mod & KMOD_ALT   ? GDK_MOD1_MASK : 0);
+
+    ev->key.string = NULL;
+    ev->key.length = 0;
+
+    if (type == GDK_KEY_PRESS &&
+            !(key->keysym.mod & (KMOD_CTRL | KMOD_ALT)))
+    {
+        gunichar uc = gdk_keyval_to_unicode(keyval);
+        if (uc != 0 && !g_unichar_iscntrl(uc)) {
+            gchar buf[8];
+            gint len = g_unichar_to_utf8(uc, buf);
+            ev->key.string = g_strndup(buf, len);
+            ev->key.length = len;
+        }
+    }
+
+    gdk_event_set_device(ev, kbd);
+    gdk_event_put(ev);
+
+    SDL_Log("[KEY %s] %s keyval=%u hw=%u string=%s",
+        type == GDK_KEY_PRESS ? "PRESS" : "RELEASE",
+        SDL_GetKeyName(key->keysym.sym),
+        keyval,
+        ev->key.hardware_keycode,
+        ev->key.string ? ev->key.string : "(null)");
+
+    gdk_event_free(ev);
 }
 
 void web_view_handle_mouse(View *v, SDL_MouseButtonEvent *btn)
 {
-    (void)v;
-    (void)btn;
-    /* TODO: forward to WebKit */
+    WebView *wv = (WebView *)v;
+
+    if (!wv || !wv->wk)
+        return;
+
+    GdkWindow *win =
+        gtk_widget_get_window(GTK_WIDGET(wv->wk));
+    if (!win)
+        return;
+
+    GdkDevice *ptr = get_pointer_device(GTK_WIDGET(wv->wk));
+    if (!ptr)
+        return;
+
+    GdkEventType type =
+        (btn->type == SDL_MOUSEBUTTONDOWN)
+            ? GDK_BUTTON_PRESS
+            : GDK_BUTTON_RELEASE;
+
+    GdkEvent *ev = gdk_event_new(type);
+
+    ev->button.window = g_object_ref(win);
+    ev->button.send_event = TRUE;
+    ev->button.time = GDK_CURRENT_TIME;
+
+    ev->button.x = btn->x;
+    ev->button.y = btn->y;
+
+    ev->button.button = btn->button;
+    ev->button.state = 0;
+
+    gdk_event_set_device(ev, ptr);
+
+    SDL_Log(
+        "[SDL MOUSE] %s button=%d x=%d y=%d",
+        btn->type == SDL_MOUSEBUTTONDOWN ? "DOWN" : "UP",
+        btn->button,
+        btn->x,
+        btn->y
+    );
+
+    gdk_event_put(ev);
+    gdk_event_free(ev);
 }
 
 void web_view_handle_motion(View *v, SDL_MouseMotionEvent *motion)
 {
-    (void)v;
-    (void)motion;
-    /* TODO: forward to WebKit */
+    WebView *wv = (WebView *)v;
+
+    if (!wv || !wv->wk)
+        return;
+
+    GdkWindow *win =
+        gtk_widget_get_window(GTK_WIDGET(wv->wk));
+    if (!win)
+        return;
+
+    GdkDevice *ptr = get_pointer_device(GTK_WIDGET(wv->wk));
+    if (!ptr)
+        return;
+
+    GdkEvent *ev = gdk_event_new(GDK_MOTION_NOTIFY);
+
+    ev->motion.window = g_object_ref(win);
+    ev->motion.send_event = TRUE;
+    ev->motion.time = GDK_CURRENT_TIME;
+
+    ev->motion.x = motion->x;
+    ev->motion.y = motion->y;
+
+    gdk_event_set_device(ev, ptr);
+
+    SDL_Log("[SDL MOTION] x=%d y=%d", motion->x, motion->y);
+
+    gdk_event_put(ev);
+    gdk_event_free(ev);
+}
+void web_view_handle_wheel(View *v, SDL_MouseWheelEvent *wheel)
+{
+    WebView *wv = (WebView *)v;
+
+    GdkWindow *win = gtk_widget_get_window(GTK_WIDGET(wv->wk));
+    GdkDevice *ptr = get_pointer_device(wv->offscreen);
+    if (!win || !ptr)
+        return;
+
+    GdkEvent *ev = gdk_event_new(GDK_SCROLL);
+
+    ev->scroll.window = g_object_ref(win);
+    ev->scroll.send_event = TRUE;
+    ev->scroll.time = GDK_CURRENT_TIME;
+
+    /* Smooth scrolling */
+    ev->scroll.direction = GDK_SCROLL_SMOOTH;
+    ev->scroll.delta_x = -wheel->x;
+    ev->scroll.delta_y = -wheel->y;
+
+    gdk_event_set_device(ev, ptr);
+    gdk_event_put(ev);
+
+    SDL_Log("[SCROLL] dx=%d dy=%d", wheel->x, wheel->y);
+
+    gdk_event_free(ev);
+}
+static guint sdl_key_to_gdk(SDL_KeyCode key){
+    /* ASCII range maps 1:1 */
+    if (key >= 32 && key <= 126)
+        return (guint)key;
+
+    switch (key) {
+        case SDLK_RETURN:    return GDK_KEY_Return;
+        case SDLK_BACKSPACE: return GDK_KEY_BackSpace;
+        case SDLK_TAB:       return GDK_KEY_Tab;
+        case SDLK_ESCAPE:    return GDK_KEY_Escape;
+        case SDLK_DELETE:    return GDK_KEY_Delete;
+
+        case SDLK_LEFT:  return GDK_KEY_Left;
+        case SDLK_RIGHT: return GDK_KEY_Right;
+        case SDLK_UP:    return GDK_KEY_Up;
+        case SDLK_DOWN:  return GDK_KEY_Down;
+
+        default:
+                         return 0;
+    }
+}
+static GdkDevice *get_keyboard_device(GtkWidget *widget)
+{
+    GdkWindow *win = gtk_widget_get_window(widget);
+    if (!win) return NULL;
+
+    GdkDisplay *display = gdk_window_get_display(win);
+    GdkSeat *seat = gdk_display_get_default_seat(display);
+
+    return gdk_seat_get_keyboard(seat);
+}
+
+static GdkDevice *get_pointer_device(GtkWidget *widget)
+{
+    GdkWindow *win = gtk_widget_get_window(widget);
+    if (!win) return NULL;
+
+    GdkDisplay *display = gdk_window_get_display(win);
+    GdkSeat *seat = gdk_display_get_default_seat(display);
+
+    return gdk_seat_get_pointer(seat);
+}
+
+//gdk requires hardare keycode for backspace and following keys
+static guint
+guess_hardware_keycode(guint keyval)
+{
+    switch (keyval) {
+        case GDK_KEY_BackSpace: return 22;
+        case GDK_KEY_Return:    return 36;
+        case GDK_KEY_Tab:       return 23;
+        case GDK_KEY_Escape:    return 9;
+        default:                return 0;
+    }
 }
