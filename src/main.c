@@ -38,6 +38,9 @@ int main(void) {
     SDL_Event e;
 
     while (running) {
+        while(gtk_events_pending()){
+            gtk_main_iteration();
+        }
         while (SDL_PollEvent(&e)) {
             
             if (focused && focused->view) {
@@ -49,26 +52,6 @@ int main(void) {
                     case SDL_MOUSEBUTTONDOWN:
                         web_view_handle_mouse(focused->view, &e.button);
                         break;
-void web_view_handle_key(View *v, SDL_KeyboardEvent *key)
-{
-    (void)v;
-    (void)key;
-    /* TODO: forward to WebKit */
-}
-
-void web_view_handle_mouse(View *v, SDL_MouseButtonEvent *btn)
-{
-    (void)v;
-    (void)btn;
-    /* TODO: forward to WebKit */
-}
-
-void web_view_handle_motion(View *v, SDL_MouseMotionEvent *motion)
-{
-    (void)v;
-    (void)motion;
-    /* TODO: forward to WebKit */
-}
 
                     case SDL_MOUSEMOTION:
                         web_view_handle_motion(focused->view, &e.motion);
