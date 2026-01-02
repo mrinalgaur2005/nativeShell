@@ -12,9 +12,6 @@
 #include <stdlib.h>
 
 
-
-
-
 static guint sdl_key_to_gdk(SDL_KeyCode key);
 static void web_view_ensure_surface(WebView *wv, int w, int h);
 static void web_view_ensure_texture(WebView *wv,SDL_Renderer *renderer);

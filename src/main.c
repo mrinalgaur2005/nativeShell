@@ -13,6 +13,17 @@
 #include "view.h"
 #include "web_view.h"
 
+typedef struct {
+    bool active;
+    LayoutNode *node;
+    bool vertical;
+    int start_x, start_y;
+    float start_ratio;
+} ResizeState;
+
+static ResizeState resize = {0};
+
+
 typedef enum{
     INPUT_MODE_WM, //for hjkl (moving), s(splitting horiontalu),v(splitting vertically) x(merging) 
                    //esc for entering this
@@ -37,7 +48,10 @@ void cmd_open_webview(LayoutNode *leaf){
 int main(void) {
     gtk_init(NULL,NULL);
     SDL_Init(SDL_INIT_VIDEO);
-
+    
+    SDL_Cursor *cursor_we = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
+    SDL_Cursor *cursor_ns = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
+    SDL_Cursor *cursor_arrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
     SDL_Window *win = SDL_CreateWindow(
             "Layout Tree",
             SDL_WINDOWPOS_CENTERED,
@@ -67,11 +81,56 @@ int main(void) {
 
         while (SDL_PollEvent(&e)) {
 
+            /* ---------- Split resize (mouse) ---------- */
+            if (e.type == SDL_MOUSEBUTTONDOWN &&
+                    e.button.button == SDL_BUTTON_LEFT)
+            {
+                SplitHit hit;
+                if (hit_test_split(root, e.button.x, e.button.y, &hit)) {
+                    resize.active = true;
+                    resize.node = hit.node;
+                    resize.vertical = hit.vertical;
+                    resize.start_x = e.button.x;
+                    resize.start_y = e.button.y;
+                    resize.start_ratio = hit.node->ratio;
+                    continue; 
+                }
+            }
             if (e.type == SDL_QUIT) {
                 running = false;
                 break;
             }
 
+            if (e.type == SDL_MOUSEMOTION) {
+
+                if (resize.active) {
+                    SDL_Rect r = resize.node->rect;
+
+                    if (resize.vertical) {
+                        int dx = e.motion.x - resize.start_x;
+                        resize.node->ratio =
+                            CLAMP(resize.start_ratio + (float)dx / r.w, 0.1f, 0.9f);
+                    } else {
+                        int dy = e.motion.y - resize.start_y;
+                        resize.node->ratio =
+                            CLAMP(resize.start_ratio + (float)dy / r.h, 0.1f, 0.9f);
+                    }
+                    continue;
+                }
+
+                SplitHit hit;
+                if (hit_test_split(root, e.motion.x, e.motion.y, &hit)) {
+                    SDL_SetCursor(hit.vertical ? cursor_we : cursor_ns);
+                } else {
+                    SDL_SetCursor(cursor_arrow);
+                }
+            }
+            if (e.type == SDL_MOUSEBUTTONUP &&
+                    e.button.button == SDL_BUTTON_LEFT)
+            {
+                resize.active = false;
+                resize.node = NULL;
+            }
             /* ---------- Mouse focus (ALWAYS) ---------- */
             if (e.type == SDL_MOUSEBUTTONDOWN) {
 
@@ -86,6 +145,7 @@ int main(void) {
                     {
                         WebView *wv = (WebView *)focused->view;
                         gtk_widget_grab_focus(GTK_WIDGET(wv->wk));
+                        input_mode=INPUT_MODE_WM;
                     }
                 }
             }

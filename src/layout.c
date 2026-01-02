@@ -169,3 +169,38 @@ void layout_destroy(LayoutNode *node) {
     if(node->view)node->view->destroy(node->view);
     free(node);
 }
+bool hit_test_split(LayoutNode *node, int x, int y, SplitHit *out)
+{
+    if (!node || node->type == NODE_LEAF)
+        return false;
+
+    SDL_Rect r = node->rect;
+
+    if (node->split == SPLIT_VERTICAL) {
+        int split_x = r.x + (int)(r.w * node->ratio);
+
+        if (abs(x - split_x) <= SPLIT_GRAB_MARGIN &&
+            y >= r.y &&
+            y <= r.y + r.h)
+        {
+            out->node = node;
+            out->vertical = true;
+            return true;
+        }
+    }
+    else if (node->split == SPLIT_HORIZONTAL) {
+        int split_y = r.y + (int)(r.h * node->ratio);
+
+        if (abs(y - split_y) <= SPLIT_GRAB_MARGIN &&
+            x >= r.x &&
+            x <= r.x + r.w)
+        {
+            out->node = node;
+            out->vertical = false;
+            return true;
+        }
+    }
+
+    return hit_test_split(node->a, x, y, out) ||
+           hit_test_split(node->b, x, y, out);
+}

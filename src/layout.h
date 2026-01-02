@@ -3,6 +3,7 @@
 #include "view.h"
 #include <SDL2/SDL.h>
 
+#define SPLIT_GRAB_MARGIN 6
 typedef enum {
     NODE_LEAF,
     NODE_SPLIT
@@ -27,6 +28,11 @@ typedef struct LayoutNode {
     int id;
 } LayoutNode;
 
+typedef struct{
+    LayoutNode *node;
+    bool vertical;
+}SplitHit;
+bool hit_test_split(LayoutNode *node,int x,int y,SplitHit *out);
 LayoutNode *layout_leaf(int id);
 LayoutNode *layout_split_node(SplitDirection dir,float ratio);
 LayoutNode *layout_split_leaf(LayoutNode *leaf,
