@@ -1,7 +1,10 @@
+#include "command.h"
+#include "command_overlay.h"
 #include "focus.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_keycode.h>
+#include <SDL2/SDL_log.h>
 #include <SDL2/SDL_render.h>
 #include <sched.h>
 #include <stdbool.h>
@@ -28,6 +31,7 @@ typedef enum{
     INPUT_MODE_WM, //for hjkl (moving), s(splitting horiontalu),v(splitting vertically) x(merging) 
                    //esc for entering this
     INPUT_MODE_VIEW,//press i to go insertmode(vim inspired obv) for using browser
+    INPUT_MODE_CMD //uses for command mode again vim inspired
 } InputMode;
 
 InputMode input_mode = INPUT_MODE_WM;
@@ -48,7 +52,8 @@ void cmd_open_webview(LayoutNode *leaf){
 int main(void) {
     gtk_init(NULL,NULL);
     SDL_Init(SDL_INIT_VIDEO);
-    
+    cmd_overlay_init();
+
     SDL_Cursor *cursor_we = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
     SDL_Cursor *cursor_ns = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
     SDL_Cursor *cursor_arrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
@@ -166,6 +171,17 @@ int main(void) {
                     input_mode = INPUT_MODE_VIEW;
                     continue;
                 }
+
+                if (input_mode == INPUT_MODE_WM &&
+                        e.type == SDL_KEYDOWN &&
+                        e.key.keysym.sym == SDLK_SEMICOLON &&
+                        (e.key.keysym.mod & KMOD_SHIFT))
+                {
+                    SDL_Log("colon pressed");
+                    cmd_enter();
+                    input_mode = INPUT_MODE_CMD;
+                    continue;
+                }
             }
 
             /* ---------- VIEW MODE: forward everything ---------- */
@@ -197,6 +213,37 @@ int main(void) {
                         break;
                 }
                 continue; /* IMPORTANT */
+            }
+            /* ---------- CMD MODE ONLY---------- */
+
+            if (input_mode == INPUT_MODE_CMD) {
+                if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) {
+                    cmd_exit();
+                    input_mode = INPUT_MODE_WM;
+                    continue;
+                }
+
+                if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_RETURN) {
+                    if (cmd_execute(focused))
+                        input_mode = INPUT_MODE_VIEW;
+                    else
+                        input_mode = INPUT_MODE_WM;
+
+                    cmd_exit();
+                    continue;
+                }
+
+                if (e.type == SDL_KEYDOWN) {
+                    cmd_handle_key(&e.key);
+                    continue;
+                }
+
+                if (e.type == SDL_TEXTINPUT) {
+                    cmd_handle_text(e.text.text);
+                    continue;
+                }
+
+                continue; 
             }
 
             /* ---------- WM MODE ONLY ---------- */
@@ -239,6 +286,7 @@ int main(void) {
                         break;
 
                     case SDLK_o:
+                        
                         cmd_open_webview(focused);
                         break;
                 }
@@ -254,6 +302,8 @@ int main(void) {
         SDL_RenderClear(ren);
 
         render_layout(ren, root, focused);
+        if (input_mode == INPUT_MODE_CMD)
+            render_cmd_overlay(ren, w, h);
 
         SDL_RenderPresent(ren);
     }

@@ -142,6 +142,11 @@ static void web_view_ensure_surface(WebView *wv, int w, int h)
 
 }
 
+void web_view_load_url(View *v, const char *url)
+{
+    WebView *wv = (WebView *)v;
+    webkit_web_view_load_uri(wv->wk, url);
+}
 
 //dont alter handels key typing
 //doesnt include symbols and clipboard
