@@ -8,6 +8,26 @@
 #include <stdlib.h>
 #include <wchar.h>
 
+
+typedef struct {
+    int x;
+    int y;
+    LayoutNode *hit;
+} LeafHitTest;
+
+static void leaf_hit_test(LayoutNode *n, void *ud);
+static void leaf_hit_test(LayoutNode *n, void *ud)
+{
+    LeafHitTest *t = ud;
+
+    if (t->x >= n->rect.x &&
+        t->y >= n->rect.y &&
+        t->x <  n->rect.x + n->rect.w &&
+        t->y <  n->rect.y + n->rect.h)
+    {
+        t->hit = n;
+    }
+}
 LayoutNode *layout_leaf(int id) {
     LayoutNode *n = calloc(1, sizeof(LayoutNode));
     n->type = NODE_LEAF;
@@ -131,6 +151,17 @@ void layout_traverse_leaves(LayoutNode *node,
     layout_traverse_leaves(node->b, fn, userdata);
 }
 
+LayoutNode *layout_leaf_at(LayoutNode *root, int x, int y)
+{
+    LeafHitTest t = {
+        .x = x,
+        .y = y,
+        .hit = NULL
+    };
+
+    layout_traverse_leaves(root, leaf_hit_test, &t);
+    return t.hit;
+}
 void layout_destroy(LayoutNode *node) {
     if (!node) return;
     layout_destroy(node->a);

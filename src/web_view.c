@@ -12,18 +12,6 @@
 #include <stdlib.h>
 
 
-typedef struct {
-    View base;
-    GtkWidget *offscreen;
-    WebKitWebView *wk;
-
-    cairo_surface_t *surface;
-    cairo_t *cr;
-    int width;
-    int height;
-
-    SDL_Texture *texture;
-} WebView;
 
 
 

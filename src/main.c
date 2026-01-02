@@ -61,9 +61,9 @@ int main(void) {
 
     while (running) {
 
-        while (gtk_events_pending()) {
+        /* ---- GTK pump (non-blocking) ---- */
+        while (gtk_events_pending())
             gtk_main_iteration();
-        }
 
         while (SDL_PollEvent(&e)) {
 
@@ -72,19 +72,43 @@ int main(void) {
                 break;
             }
 
+            /* ---------- Mouse focus (ALWAYS) ---------- */
+            if (e.type == SDL_MOUSEBUTTONDOWN) {
+
+                LayoutNode *hit =
+                    layout_leaf_at(root, e.button.x, e.button.y);
+
+                if (hit && hit != focused) {
+                    focused = hit;
+
+                    if (focused->view &&
+                            focused->view->type == VIEW_WEB)
+                    {
+                        WebView *wv = (WebView *)focused->view;
+                        gtk_widget_grab_focus(GTK_WIDGET(wv->wk));
+                    }
+                }
+            }
+
+            /* ---------- Mode switching ---------- */
             if (e.type == SDL_KEYDOWN && !e.key.repeat) {
+
                 if (e.key.keysym.sym == SDLK_ESCAPE) {
                     input_mode = INPUT_MODE_WM;
                     continue;
                 }
-                if (e.key.keysym.sym == SDLK_i && input_mode == INPUT_MODE_WM 
-                        && focused && focused->view && focused->view->type == VIEW_WEB)
+
+                if (e.key.keysym.sym == SDLK_i &&
+                        input_mode == INPUT_MODE_WM &&
+                        focused && focused->view &&
+                        focused->view->type == VIEW_WEB)
                 {
                     input_mode = INPUT_MODE_VIEW;
                     continue;
                 }
             }
 
+            /* ---------- VIEW MODE: forward everything ---------- */
             if (input_mode == INPUT_MODE_VIEW &&
                     focused && focused->view &&
                     focused->view->type == VIEW_WEB)
@@ -98,22 +122,27 @@ int main(void) {
 
                     case SDL_MOUSEBUTTONDOWN:
                     case SDL_MOUSEBUTTONUP:
-                        web_view_handle_mouse(focused->view, &e.button,focused->rect);
+                        web_view_handle_mouse(
+                                focused->view, &e.button, focused->rect);
                         break;
 
                     case SDL_MOUSEMOTION:
-                        web_view_handle_motion(focused->view, &e.motion,focused->rect);
+                        web_view_handle_motion(
+                                focused->view, &e.motion, focused->rect);
                         break;
 
                     case SDL_MOUSEWHEEL:
-                        web_view_handle_wheel(focused->view, &e.wheel,focused->rect);
+                        web_view_handle_wheel(
+                                focused->view, &e.wheel, focused->rect);
                         break;
                 }
-
-                continue;
+                continue; /* IMPORTANT */
             }
-            if (e.type == SDL_KEYDOWN && !e.key.repeat) {
 
+            /* ---------- WM MODE ONLY ---------- */
+            if (input_mode == INPUT_MODE_WM &&
+                    e.type == SDL_KEYDOWN && !e.key.repeat)
+            {
                 if (focused && focused->type != NODE_LEAF)
                     focused = layout_first_leaf(focused);
 
@@ -146,8 +175,9 @@ int main(void) {
                         break;
 
                     case SDLK_j:
-                        focused = focus_move(root, focused, DIR_DOWN); 
+                        focused = focus_move(root, focused, DIR_DOWN);
                         break;
+
                     case SDLK_o:
                         cmd_open_webview(focused);
                         break;
@@ -157,11 +187,14 @@ int main(void) {
 
         int w, h;
         SDL_GetWindowSize(win, &w, &h);
+
         layout_assign(root, (SDL_Rect){0, 0, w, h});
 
         SDL_SetRenderDrawColor(ren, 30, 30, 30, 255);
         SDL_RenderClear(ren);
+
         render_layout(ren, root, focused);
+
         SDL_RenderPresent(ren);
     }
 

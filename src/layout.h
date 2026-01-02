@@ -42,4 +42,5 @@ void layout_traverse_leaves(LayoutNode *node,
                             void (*fn)(LayoutNode *, void *),
                             void *userdata);
 
+LayoutNode *layout_leaf_at(LayoutNode *root, int x, int y);
 void layout_destroy(LayoutNode *node);

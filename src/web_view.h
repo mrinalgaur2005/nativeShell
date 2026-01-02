@@ -1,8 +1,22 @@
 
 #pragma once
 #include "view.h"
+#include "gtk/gtk.h"
 
 typedef struct _WebKitWebView WebKitWebView;
+
+typedef struct {
+    View base;
+    GtkWidget *offscreen;
+    WebKitWebView *wk;
+
+    cairo_surface_t *surface;
+    cairo_t *cr;
+    int width;
+    int height;
+
+    SDL_Texture *texture;
+} WebView;
 
 View *web_view_create(const char *url);
 
