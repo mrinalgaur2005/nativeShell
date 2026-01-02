@@ -219,86 +219,7 @@ void web_view_handle_key(View *v, SDL_KeyboardEvent *key)
     gdk_event_free(ev);
 }
 
-void web_view_handle_mouse(View *v, SDL_MouseButtonEvent *btn)
-{
-    WebView *wv = (WebView *)v;
-
-    if (!wv || !wv->wk)
-        return;
-
-    GdkWindow *win =
-        gtk_widget_get_window(GTK_WIDGET(wv->wk));
-    if (!win)
-        return;
-
-    GdkDevice *ptr = get_pointer_device(GTK_WIDGET(wv->wk));
-    if (!ptr)
-        return;
-
-    GdkEventType type =
-        (btn->type == SDL_MOUSEBUTTONDOWN)
-            ? GDK_BUTTON_PRESS
-            : GDK_BUTTON_RELEASE;
-
-    GdkEvent *ev = gdk_event_new(type);
-
-    ev->button.window = g_object_ref(win);
-    ev->button.send_event = TRUE;
-    ev->button.time = GDK_CURRENT_TIME;
-
-    ev->button.x = btn->x;
-    ev->button.y = btn->y;
-
-    ev->button.button = btn->button;
-    ev->button.state = 0;
-
-    gdk_event_set_device(ev, ptr);
-
-    SDL_Log(
-        "[SDL MOUSE] %s button=%d x=%d y=%d",
-        btn->type == SDL_MOUSEBUTTONDOWN ? "DOWN" : "UP",
-        btn->button,
-        btn->x,
-        btn->y
-    );
-
-    gdk_event_put(ev);
-    gdk_event_free(ev);
-}
-
-void web_view_handle_motion(View *v, SDL_MouseMotionEvent *motion)
-{
-    WebView *wv = (WebView *)v;
-
-    if (!wv || !wv->wk)
-        return;
-
-    GdkWindow *win =
-        gtk_widget_get_window(GTK_WIDGET(wv->wk));
-    if (!win)
-        return;
-
-    GdkDevice *ptr = get_pointer_device(GTK_WIDGET(wv->wk));
-    if (!ptr)
-        return;
-
-    GdkEvent *ev = gdk_event_new(GDK_MOTION_NOTIFY);
-
-    ev->motion.window = g_object_ref(win);
-    ev->motion.send_event = TRUE;
-    ev->motion.time = GDK_CURRENT_TIME;
-
-    ev->motion.x = motion->x;
-    ev->motion.y = motion->y;
-
-    gdk_event_set_device(ev, ptr);
-
-    SDL_Log("[SDL MOTION] x=%d y=%d", motion->x, motion->y);
-
-    gdk_event_put(ev);
-    gdk_event_free(ev);
-}
-void web_view_handle_wheel(View *v, SDL_MouseWheelEvent *wheel)
+void web_view_handle_mouse(View *v, SDL_MouseButtonEvent *btn,SDL_Rect rect)
 {
     WebView *wv = (WebView *)v;
 
@@ -307,22 +228,70 @@ void web_view_handle_wheel(View *v, SDL_MouseWheelEvent *wheel)
     if (!win || !ptr)
         return;
 
-    GdkEvent *ev = gdk_event_new(GDK_SCROLL);
+    double local_x = btn->x - rect.x;
+    double local_y = btn->y - rect.y;
 
-    ev->scroll.window = g_object_ref(win);
-    ev->scroll.send_event = TRUE;
-    ev->scroll.time = GDK_CURRENT_TIME;
+    if (local_x < 0 || local_y < 0 ||
+            local_x >= rect.w || local_y >= rect.h)
+        return;
 
-    /* Smooth scrolling */
-    ev->scroll.direction = GDK_SCROLL_SMOOTH;
-    ev->scroll.delta_x = -wheel->x;
-    ev->scroll.delta_y = -wheel->y;
+    GdkEvent *ev = gdk_event_new(
+            btn->type == SDL_MOUSEBUTTONDOWN
+            ? GDK_BUTTON_PRESS
+            : GDK_BUTTON_RELEASE
+            );
+
+    ev->button.window = g_object_ref(win);
+    ev->button.send_event = TRUE;
+    ev->button.time = GDK_CURRENT_TIME;
+    ev->button.x = local_x;
+    ev->button.y = local_y;
+    ev->button.button = btn->button;
 
     gdk_event_set_device(ev, ptr);
     gdk_event_put(ev);
+    gdk_event_free(ev);}
 
-    SDL_Log("[SCROLL] dx=%d dy=%d", wheel->x, wheel->y);
+void web_view_handle_motion(View *v,
+                            SDL_MouseMotionEvent *motion,
+                            SDL_Rect rect)
+{
+    WebView *wv = (WebView *)v;
 
+    double local_x = motion->x - rect.x;
+    double local_y = motion->y - rect.y;
+
+    if (local_x < 0 || local_y < 0 ||
+        local_x >= rect.w || local_y >= rect.h)
+        return;
+
+    GdkEvent *ev = gdk_event_new(GDK_MOTION_NOTIFY);
+    ev->motion.window = g_object_ref(
+        gtk_widget_get_window(GTK_WIDGET(wv->wk)));
+    ev->motion.time = GDK_CURRENT_TIME;
+    ev->motion.x = local_x;
+    ev->motion.y = local_y;
+
+    gdk_event_set_device(ev, get_pointer_device(wv->offscreen));
+    gdk_event_put(ev);
+    gdk_event_free(ev);
+}
+
+void web_view_handle_wheel(View *v,
+                           SDL_MouseWheelEvent *wheel,
+                           SDL_Rect rect)
+{
+    WebView *wv = (WebView *)v;
+
+    GdkEvent *ev = gdk_event_new(GDK_SCROLL);
+    ev->scroll.window = g_object_ref(
+        gtk_widget_get_window(GTK_WIDGET(wv->wk)));
+    ev->scroll.time = GDK_CURRENT_TIME;
+    ev->scroll.direction =
+        wheel->y > 0 ? GDK_SCROLL_UP : GDK_SCROLL_DOWN;
+
+    gdk_event_set_device(ev, get_pointer_device(wv->offscreen));
+    gdk_event_put(ev);
     gdk_event_free(ev);
 }
 static guint sdl_key_to_gdk(SDL_KeyCode key){
