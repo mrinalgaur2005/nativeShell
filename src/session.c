@@ -1,13 +1,16 @@
 #include "session.h"
 #include "layout.h"
 #include "web_view.h"
+
 #include <cjson/cJSON.h>
 #include <SDL2/SDL_log.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
+
 
 static const char *session_path(void)
 {
@@ -31,120 +34,58 @@ static void ensure_session_dir(void)
     mkdir(dir, 0755);
 }
 
-static char *read_file(const char *path)
+
+static void save_node_json(FILE *f, LayoutNode *n, int indent)
 {
-    FILE *f = fopen(path, "r");
-    if (!f) return NULL;
-
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    rewind(f);
-
-    char *buf = malloc(size + 1);
-    if (!buf) {
-        fclose(f);
-        return NULL;
-    }
-
-    fread(buf, 1, size, f);
-    buf[size] = '\0';
-    fclose(f);
-    return buf;
-}
-
-static char *json_find(char *json, const char *key)
-{
-    char needle[64];
-    snprintf(needle, sizeof(needle), "\"%s\"", key);
-    return strstr(json, needle);
-}
-
-static int json_read_int(char *json, const char *key, int def)
-{
-    char *p = json_find(json, key);
-    if (!p) return def;
-    int v;
-    sscanf(p, "\"%*[^:]: %d", &v);
-    return v;
-}
-
-static float json_read_float(char *json, const char *key, float def)
-{
-    char *p = json_find(json, key);
-    if (!p) return def;
-    float v;
-    sscanf(p, "\"%*[^:]: %f", &v);
-    return v;
-}
-
-static void json_read_string(char *json,
-                             const char *key,
-                             char *out,
-                             size_t n)
-{
-    char *p = json_find(json, key);
-    if (!p) {
-        out[0] = '\0';
-        return;
-    }
-    sscanf(p, "\"%*[^:]: \"%255[^\"]\"", out);
-}
-
-static void indent(FILE *f, int n)
-{
-    while (n--) fputs("  ", f);
-}
-
-static void save_node_json(FILE *f, LayoutNode *n, int indent_lvl)
-{
-    indent(f, indent_lvl);
+    for (int i = 0; i < indent; i++) fputs("  ", f);
     fputs("{\n", f);
 
-    indent(f, indent_lvl + 1);
+    for (int i = 0; i < indent + 1; i++) fputs("  ", f);
     fprintf(f, "\"type\": \"%s\",\n",
             n->type == NODE_LEAF ? "leaf" : "split");
 
     if (n->type == NODE_LEAF) {
 
-        indent(f, indent_lvl + 1);
+        for (int i = 0; i < indent + 1; i++) fputs("  ", f);
         fprintf(f, "\"id\": %d,\n", n->id);
 
-        indent(f, indent_lvl + 1);
+        for (int i = 0; i < indent + 1; i++) fputs("  ", f);
         fputs("\"view\": {\n", f);
 
-        indent(f, indent_lvl + 2);
+        for (int i = 0; i < indent + 2; i++) fputs("  ", f);
         if (n->view->type == VIEW_WEB) {
             fprintf(f, "\"type\": \"web\",\n");
-            indent(f, indent_lvl + 2);
+            for (int i = 0; i < indent + 2; i++) fputs("  ", f);
             fprintf(f, "\"url\": \"%s\"\n",
                     web_view_get_url(n->view));
         } else {
             fprintf(f, "\"type\": \"placeholder\"\n");
         }
 
-        indent(f, indent_lvl + 1);
+        for (int i = 0; i < indent + 1; i++) fputs("  ", f);
         fputs("}\n", f);
-    }
-    else {
-        indent(f, indent_lvl + 1);
+
+    } else {
+
+        for (int i = 0; i < indent + 1; i++) fputs("  ", f);
         fprintf(f, "\"dir\": \"%c\",\n",
                 n->split == SPLIT_VERTICAL ? 'v' : 'h');
 
-        indent(f, indent_lvl + 1);
+        for (int i = 0; i < indent + 1; i++) fputs("  ", f);
         fprintf(f, "\"ratio\": %.3f,\n", n->ratio);
 
-        indent(f, indent_lvl + 1);
+        for (int i = 0; i < indent + 1; i++) fputs("  ", f);
         fputs("\"a\": ", f);
-        save_node_json(f, n->a, indent_lvl + 1);
+        save_node_json(f, n->a, indent + 1);
         fputs(",\n", f);
 
-        indent(f, indent_lvl + 1);
+        for (int i = 0; i < indent + 1; i++) fputs("  ", f);
         fputs("\"b\": ", f);
-        save_node_json(f, n->b, indent_lvl + 1);
+        save_node_json(f, n->b, indent + 1);
         fputc('\n', f);
     }
 
-    indent(f, indent_lvl);
+    for (int i = 0; i < indent; i++) fputs("  ", f);
     fputs("}", f);
 }
 
@@ -168,17 +109,30 @@ void session_save(LayoutNode *root, LayoutNode *focused)
     fclose(f);
 }
 
-static LayoutNode *load_node_cjson(cJSON *jnode, LayoutNode *parent)
+
+static LayoutNode *load_node_cjson(
+    cJSON *jnode,
+    LayoutNode *parent,
+    int *max_id)
 {
-    const char *type = cJSON_GetObjectItem(jnode, "type")->valuestring;
+    const char *type =
+        cJSON_GetObjectItem(jnode, "type")->valuestring;
 
     if (strcmp(type, "leaf") == 0) {
-        int id = cJSON_GetObjectItem(jnode, "id")->valueint;
-        LayoutNode *n = layout_leaf(id);
+
+        int saved_id =
+            cJSON_GetObjectItem(jnode, "id")->valueint;
+
+        LayoutNode *n = layout_leaf();
+        n->id = saved_id; 
         n->parent = parent;
 
+        if (saved_id > *max_id)
+            *max_id = saved_id;
+
         cJSON *view = cJSON_GetObjectItem(jnode, "view");
-        const char *vtype = cJSON_GetObjectItem(view, "type")->valuestring;
+        const char *vtype =
+            cJSON_GetObjectItem(view, "type")->valuestring;
 
         if (strcmp(vtype, "web") == 0) {
             const char *url =
@@ -190,6 +144,7 @@ static LayoutNode *load_node_cjson(cJSON *jnode, LayoutNode *parent)
 
         return n;
     }
+
 
     const char *dir =
         cJSON_GetObjectItem(jnode, "dir")->valuestring;
@@ -203,8 +158,10 @@ static LayoutNode *load_node_cjson(cJSON *jnode, LayoutNode *parent)
 
     n->parent = parent;
 
-    n->a = load_node_cjson(cJSON_GetObjectItem(jnode, "a"), n);
-    n->b = load_node_cjson(cJSON_GetObjectItem(jnode, "b"), n);
+    n->a = load_node_cjson(
+        cJSON_GetObjectItem(jnode, "a"), n, max_id);
+    n->b = load_node_cjson(
+        cJSON_GetObjectItem(jnode, "b"), n, max_id);
 
     return n;
 }
@@ -226,15 +183,19 @@ LayoutNode *session_load(LayoutNode **focused)
 
     cJSON *root_json = cJSON_Parse(data);
     free(data);
-
     if (!root_json) return NULL;
 
     int focus_id =
         cJSON_GetObjectItem(root_json, "focused")->valueint;
 
-    cJSON *tree = cJSON_GetObjectItem(root_json, "tree");
+    cJSON *tree =
+        cJSON_GetObjectItem(root_json, "tree");
 
-    LayoutNode *root = load_node_cjson(tree, NULL);
+    int max_id = 0;
+    LayoutNode *root =
+        load_node_cjson(tree, NULL, &max_id);
+
+    layout_reset_leaf_ids(max_id + 1);
 
     if (focus_id >= 0)
         *focused = layout_find_leaf_by_id(root, focus_id);

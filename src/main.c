@@ -94,7 +94,8 @@ int main(void) {
 
     if (!root) {
         SDL_Log("no session so default session");
-        root = layout_leaf(1);
+        root = layout_leaf();
+        root->view->destroy(root->view);
         root->view = web_view_create("https://www.youtube.com");
         focused = root;
     }
@@ -247,7 +248,7 @@ int main(void) {
                 }
 
                 if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_RETURN) {
-                    if (cmd_execute(focused))
+                    if (cmd_execute(&root, &focused))
                         input_mode = INPUT_MODE_VIEW;
                     else
                         input_mode = INPUT_MODE_WM;

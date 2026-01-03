@@ -8,13 +8,21 @@
 #include <stdlib.h>
 #include <wchar.h>
 
-
+static int next_leaf_id =1;
 typedef struct {
     int x;
     int y;
     LayoutNode *hit;
 } LeafHitTest;
+int layout_next_leaf_id(void)
+{
+    return next_leaf_id++;
+}
 
+void layout_reset_leaf_ids(int start)
+{
+    next_leaf_id = start;
+}
 static void leaf_hit_test(LayoutNode *n, void *ud);
 static void leaf_hit_test(LayoutNode *n, void *ud)
 {
@@ -28,11 +36,11 @@ static void leaf_hit_test(LayoutNode *n, void *ud)
         t->hit = n;
     }
 }
-LayoutNode *layout_leaf(int id) {
+LayoutNode *layout_leaf(void) {
     LayoutNode *n = calloc(1, sizeof(LayoutNode));
     n->type = NODE_LEAF;
-    n->id = id;
-    SDL_Color color = { 80 + id * 20, 120, 160, 255 };
+    n->id = next_leaf_id++;
+    SDL_Color color = { 80 + n->id * 20, 120, 160, 255 };
     n->view = placeholder_view_create(color);
     return n;
 }
@@ -59,7 +67,7 @@ LayoutNode *layout_split_leaf(LayoutNode *leaf,
     LayoutNode *old_parent = leaf->parent;
 
     LayoutNode *split = layout_split_node(dir, ratio);
-    LayoutNode *new_leaf = layout_leaf(leaf->id + 1);
+    LayoutNode *new_leaf = layout_leaf();
 
     if (old_parent) {
         if (old_parent->a == leaf) old_parent->a = split;
@@ -220,4 +228,17 @@ bool hit_test_split(LayoutNode *node, int x, int y, SplitHit *out)
 
     return hit_test_split(node->a, x, y, out) ||
            hit_test_split(node->b, x, y, out);
+}
+void layout_clear(LayoutNode **root, LayoutNode **focused)
+{
+    if (!root || !*root)
+        return;
+
+    layout_destroy(*root);
+
+    layout_reset_leaf_ids(1);
+
+    LayoutNode *n = layout_leaf();
+    *root = n;
+    *focused = n;
 }

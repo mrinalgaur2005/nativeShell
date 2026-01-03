@@ -33,7 +33,9 @@ typedef struct{
     bool vertical;
 }SplitHit;
 bool hit_test_split(LayoutNode *node,int x,int y,SplitHit *out);
-LayoutNode *layout_leaf(int id);
+LayoutNode *layout_leaf(void);
+int layout_next_leaf_id(void);
+void layout_reset_leaf_ids(int start);
 LayoutNode *layout_split_node(SplitDirection dir,float ratio);
 LayoutNode *layout_split_leaf(LayoutNode *leaf,
                               SplitDirection dir,
@@ -51,3 +53,5 @@ void layout_traverse_leaves(LayoutNode *node,
 LayoutNode *layout_leaf_at(LayoutNode *root, int x, int y);
 void layout_destroy(LayoutNode *node);
 LayoutNode *layout_find_leaf_by_id(LayoutNode *root, int id);
+void layout_clear(LayoutNode **root, LayoutNode **focused);
+

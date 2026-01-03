@@ -9,7 +9,7 @@ void cmd_exit(void);
 
 void cmd_handle_key(SDL_KeyboardEvent *e);
 void cmd_handle_text(const char *text);
-bool cmd_execute(LayoutNode *focused);
+bool cmd_execute(LayoutNode **root,LayoutNode **focused);
 
 const char *cmd_buffer(void);
 bool cmd_active(void);

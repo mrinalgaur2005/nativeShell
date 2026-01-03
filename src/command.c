@@ -1,5 +1,6 @@
 
 #include "command.h"
+#include "layout.h"
 #include "web_view.h"
 #include <SDL2/SDL_keyboard.h>
 #include <SDL2/SDL_log.h>
@@ -51,29 +52,47 @@ void cmd_handle_text(const char *text)
     }
     buffer[len] = '\0';
 }
-bool cmd_execute(LayoutNode *focused)
+bool cmd_execute(LayoutNode **root, LayoutNode **focused)
 {
-    SDL_Log("Inside command.c");
-    if (!focused || !focused->view)
+    if (!root || !*root || !focused || !*focused)
         return false;
 
     char cmd[32];
-    char url[200];
+    char arg[256] = {0};
 
-    if (sscanf(buffer, "%31s %199s", cmd, url) != 2)
+    int n = sscanf(buffer, "%31s %255[^\n]", cmd, arg);
+    if (n < 1)
         return false;
 
-    SDL_Log("cmd='%s', url='%s'", cmd, url);
+    SDL_Log("cmd='%s' arg='%s'", cmd, arg);
 
+    /* ---------- open ---------- */
     if (strcmp(cmd, "open") == 0) {
-        if (focused->view->type != VIEW_WEB) {
-            focused->view->destroy(focused->view);
-            focused->view = web_view_create(url);
-        } else {
-            web_view_load_url(focused->view, url);
+        if (n != 2) {
+            SDL_Log("open: missing URL");
+            return false;
         }
+
+        LayoutNode *leaf = *focused;
+
+        if (leaf->view->type != VIEW_WEB) {
+            leaf->view->destroy(leaf->view);
+            leaf->view = web_view_create(arg);
+        } else {
+            web_view_load_url(leaf->view, arg);
+        }
+
         return true;
     }
 
+    /* ---------- clear ---------- */
+    if (strcmp(cmd, "clear") == 0) {
+        SDL_Log("clear command");
+
+        layout_clear(root, focused);
+        return true;
+    }
+
+    SDL_Log("unknown command: %s", cmd);
     return false;
 }
