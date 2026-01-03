@@ -1,5 +1,6 @@
 #include "command/command.h"
 #include "command/command_overlay.h"
+#include "config/config.h"
 #include "focus.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
@@ -57,11 +58,11 @@ InputMode input_mode = INPUT_MODE_WM;
 static bool is_text_key(SDL_Keycode sym);
 bool v_down = false;
 
-void cmd_open_webview(LayoutNode *leaf){
+void cmd_open_webview(LayoutNode *leaf,const char *url){
     if(!leaf || !leaf->view) return;
     if(leaf->view->type == VIEW_WEB) return;
     leaf->view->destroy(leaf->view);
-    leaf->view=web_view_create("https://www.youtube.com");
+    leaf->view=web_view_create(url);
     input_mode=INPUT_MODE_VIEW;
 
 }
@@ -71,6 +72,7 @@ int main(void) {
     gtk_init(NULL,NULL);
     SDL_Init(SDL_INIT_VIDEO);
     cmd_overlay_init();
+    config_load();
 
     SDL_Cursor *cursor_we = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
     SDL_Cursor *cursor_ns = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
@@ -89,14 +91,17 @@ int main(void) {
             );
 
     LayoutNode *focused = NULL;
+    LayoutNode *root = NULL;
 
-    LayoutNode *root = session_load(&focused);
+    if (config_restore_session())
+        root = session_load(&focused);
 
     if (!root) {
-        SDL_Log("no session so default session");
         root = layout_leaf();
-        root->view->destroy(root->view);
-        root->view = web_view_create("https://www.youtube.com");
+        const char *url = config_startup_url();
+        if (url)
+            root->view = web_view_create(url);
+        else root->view = web_view_create("https://www.youtube.com");
         focused = root;
     }
     bool running = true;
@@ -112,7 +117,8 @@ int main(void) {
 
             /* ---------- Split resize (mouse) ---------- */
             if (e.type == SDL_MOUSEBUTTONDOWN &&
-                    e.button.button == SDL_BUTTON_LEFT)
+                    e.button.button == SDL_BUTTON_LEFT &&
+                    input_mode == INPUT_MODE_VIEW)
             {
                 SplitHit hit;
                 if (hit_test_split(root, e.button.x, e.button.y, &hit)) {
@@ -174,7 +180,7 @@ int main(void) {
                     {
                         WebView *wv = (WebView *)focused->view;
                         gtk_widget_grab_focus(GTK_WIDGET(wv->wk));
-                        input_mode=INPUT_MODE_WM;
+                        input_mode=INPUT_MODE_VIEW;
                     }
                 }
             }
@@ -272,46 +278,55 @@ int main(void) {
 
             /* ---------- WM MODE ONLY ---------- */
             if (input_mode == INPUT_MODE_WM &&
-                    e.type == SDL_KEYDOWN && !e.key.repeat)
+                    e.type == SDL_KEYDOWN &&
+                    e.key.repeat == 0)
             {
-                if (focused && focused->type != NODE_LEAF)
-                    focused = layout_first_leaf(focused);
+                Action action = config_action_for_key(e.key.keysym.sym);
+                
+                const char *url = config_startup_url();
+                if(!url) url = "https://www.youtube.com";
+                switch (action) {
 
-                switch (e.key.keysym.sym) {
-
-                    case SDLK_v:
+                    case ACTION_SPLIT_VERTICAL:
                         focused = layout_split_leaf(
                                 focused, SPLIT_VERTICAL, 0.5f, &root);
                         break;
 
-                    case SDLK_s:
+                    case ACTION_SPLIT_HORIZONTAL:
                         focused = layout_split_leaf(
                                 focused, SPLIT_HORIZONTAL, 0.5f, &root);
                         break;
 
-                    case SDLK_x:
+                    case ACTION_CLOSE_PANE:
                         focused = layout_close_leaf(focused, &root);
                         break;
 
-                    case SDLK_h:
+                    case ACTION_FOCUS_LEFT:
                         focused = focus_move(root, focused, DIR_LEFT);
                         break;
 
-                    case SDLK_l:
+                    case ACTION_FOCUS_RIGHT:
                         focused = focus_move(root, focused, DIR_RIGHT);
                         break;
 
-                    case SDLK_k:
+                    case ACTION_FOCUS_UP:
                         focused = focus_move(root, focused, DIR_UP);
                         break;
 
-                    case SDLK_j:
+                    case ACTION_FOCUS_DOWN:
                         focused = focus_move(root, focused, DIR_DOWN);
                         break;
 
-                    case SDLK_o:
-                        
-                        cmd_open_webview(focused);
+                    case ACTION_OPEN_WEBVIEW:
+                        cmd_open_webview(focused,url);
+                        break;
+
+                    case ACTION_ENTER_CMD:
+                        cmd_enter();
+                        input_mode = INPUT_MODE_CMD;
+                        break;
+
+                    default:
                         break;
                 }
             }

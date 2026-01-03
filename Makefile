@@ -17,7 +17,8 @@ SRCS := \
 	$(SRC_DIR)/command/command.c \
 	$(SRC_DIR)/command/command_overlay.c \
 	$(SRC_DIR)/core/session.c \
-	$(SRC_DIR)/third_party/cjson/cJSON.c
+	$(SRC_DIR)/third_party/cjson/cJSON.c\
+	$(SRC_DIR)/config/config.c
 
 CFLAGS := -Wall -Wextra -O2 -Isrc
 PKGS   := sdl2 SDL2_image SDL2_ttf gtk+-3.0 webkit2gtk-4.1
