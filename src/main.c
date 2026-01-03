@@ -6,6 +6,7 @@
 #include <SDL2/SDL_keycode.h>
 #include <SDL2/SDL_log.h>
 #include <SDL2/SDL_render.h>
+#include <assert.h>
 #include <sched.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -13,6 +14,7 @@
 #include "gtk/gtk.h"
 #include "layout.h"
 #include "render.h"
+#include "session.h"
 #include "view.h"
 #include "web_view.h"
 
@@ -26,6 +28,22 @@ typedef struct {
 
 static ResizeState resize = {0};
 
+void layout_validate(LayoutNode *n)
+{
+    if (!n) return;
+
+    if (n->type == NODE_LEAF) {
+        assert(n->view != NULL);
+        assert(n->a == NULL && n->b == NULL);
+    } else {
+        assert(n->a && n->b);
+        assert(n->view == NULL);
+        assert(n->a->parent == n);
+        assert(n->b->parent == n);
+        layout_validate(n->a);
+        layout_validate(n->b);
+    }
+}
 
 typedef enum{
     INPUT_MODE_WM, //for hjkl (moving), s(splitting horiontalu),v(splitting vertically) x(merging) 
@@ -70,11 +88,16 @@ int main(void) {
             SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
             );
 
-    LayoutNode *root = layout_leaf(1);
-    root->view = web_view_create(
-            "https://www.youtube.com"
-            );
-    LayoutNode *focused = root;
+    LayoutNode *focused = NULL;
+
+    LayoutNode *root = session_load(&focused);
+
+    if (!root) {
+        SDL_Log("no session so default session");
+        root = layout_leaf(1);
+        root->view = web_view_create("https://www.youtube.com");
+        focused = root;
+    }
     bool running = true;
     SDL_Event e;
 
@@ -307,7 +330,8 @@ int main(void) {
 
         SDL_RenderPresent(ren);
     }
-
+    
+    session_save(root,focused);
     layout_destroy(root);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

@@ -15,7 +15,11 @@ gcc \
   "$SCRIPT_DIR/src/web_view.c" \
   "$SCRIPT_DIR/src/command.c" \
   "$SCRIPT_DIR/src/command_overlay.c" \
-  $(pkg-config --cflags --libs sdl2 SDL2_image SDL2_ttf gtk+-3.0 webkit2gtk-4.1) \
+  "$SCRIPT_DIR/src/session.c" \
+  "$SCRIPT_DIR/src/cJSON.c" \
+  $(pkg-config --cflags --libs \
+      sdl2 SDL2_image SDL2_ttf \
+      gtk+-3.0 webkit2gtk-4.1) \
   -Wall -Wextra -O2 \
   -o "$SCRIPT_DIR/main"
 

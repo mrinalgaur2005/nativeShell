@@ -151,6 +151,23 @@ void layout_traverse_leaves(LayoutNode *node,
     layout_traverse_leaves(node->b, fn, userdata);
 }
 
+LayoutNode *layout_find_leaf_by_id(LayoutNode *node, int id)
+{
+    if (!node)
+        return NULL;
+
+    if (node->type == NODE_LEAF) {
+        if (node->id == id)
+            return node;
+        return NULL;
+    }
+
+    LayoutNode *found = layout_find_leaf_by_id(node->a, id);
+    if (found)
+        return found;
+
+    return layout_find_leaf_by_id(node->b, id);
+}
 LayoutNode *layout_leaf_at(LayoutNode *root, int x, int y)
 {
     LeafHitTest t = {

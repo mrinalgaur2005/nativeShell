@@ -9,7 +9,7 @@ typedef struct {
     View base;
     GtkWidget *offscreen;
     WebKitWebView *wk;
-
+    char *url;
     cairo_surface_t *surface;
     cairo_t *cr;
     int width;
@@ -20,6 +20,7 @@ typedef struct {
 
 View *web_view_create(const char *url);
 
+const char *web_view_get_url(View *v);
 void web_view_handle_key(View *v, SDL_KeyboardEvent *key);
 void web_view_handle_mouse(View *v, SDL_MouseButtonEvent *btn,SDL_Rect leaf_rect);
 void web_view_handle_motion(View *v, SDL_MouseMotionEvent *motion,SDL_Rect leaf_rec);

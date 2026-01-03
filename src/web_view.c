@@ -3,6 +3,7 @@
 #include "gdk/gdk.h"
 #include "glib-object.h"
 #include "gtk/gtk.h"
+#include "view.h"
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_keycode.h>
 #include <SDL2/SDL_log.h>
@@ -77,9 +78,17 @@ static void web_view_ensure_texture(WebView *wv,SDL_Renderer *renderer){
 
     SDL_SetTextureBlendMode(wv->texture, SDL_BLENDMODE_BLEND);
 }
+const char *web_view_get_url(View *v)
+{
+    WebView *wv = (WebView *)v;
+    return wv->url ? wv->url : "";
+}
 static void destroy(View *v)
 {
     WebView *wv = (WebView *)v;
+
+    if (wv->url)
+        free(wv->url);
 
     if (wv->wk)
         g_object_unref(wv->wk);
@@ -89,24 +98,19 @@ static void destroy(View *v)
 
 View *web_view_create(const char *url)
 {
-    WebView *wv = calloc(1, sizeof(*wv));
-
-    wv->base.type = VIEW_WEB;
+    WebView *wv = calloc(1, sizeof(WebView));
+    wv->base.type=VIEW_WEB;
     wv->base.draw = draw;
     wv->base.destroy = destroy;
+
+    wv->url = strdup(url);   // <-- STORE URL
 
     wv->offscreen = gtk_offscreen_window_new();
     gtk_widget_set_size_request(wv->offscreen, 800, 600);
 
     wv->wk = WEBKIT_WEB_VIEW(webkit_web_view_new());
-    gtk_container_add(GTK_CONTAINER(wv->offscreen),
-                      GTK_WIDGET(wv->wk));
-
+    gtk_container_add(GTK_CONTAINER(wv->offscreen), GTK_WIDGET(wv->wk));
     gtk_widget_show_all(wv->offscreen);
-    gtk_widget_realize(wv->offscreen);
-    gtk_widget_set_can_focus(GTK_WIDGET(wv->wk), TRUE);
-    gtk_widget_grab_focus(GTK_WIDGET(wv->wk));
-    
 
     webkit_web_view_load_uri(wv->wk, url);
 
@@ -145,6 +149,11 @@ static void web_view_ensure_surface(WebView *wv, int w, int h)
 void web_view_load_url(View *v, const char *url)
 {
     WebView *wv = (WebView *)v;
+
+    if (wv->url)
+        free(wv->url);
+
+    wv->url = strdup(url);
     webkit_web_view_load_uri(wv->wk, url);
 }
 

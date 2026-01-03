@@ -50,3 +50,4 @@ void layout_traverse_leaves(LayoutNode *node,
 
 LayoutNode *layout_leaf_at(LayoutNode *root, int x, int y);
 void layout_destroy(LayoutNode *node);
+LayoutNode *layout_find_leaf_by_id(LayoutNode *root, int id);
