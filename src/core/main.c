@@ -127,7 +127,7 @@ int main(void) {
                     resize.vertical = hit.vertical;
                     resize.start_x = e.button.x;
                     resize.start_y = e.button.y;
-                    resize.start_ratio = hit.node->ratio;
+                    resize.start_ratio = hit.node->target_ratio;
                     continue; 
                 }
             }
@@ -143,11 +143,11 @@ int main(void) {
 
                     if (resize.vertical) {
                         int dx = e.motion.x - resize.start_x;
-                        resize.node->ratio =
+                        resize.node->target_ratio =
                             CLAMP(resize.start_ratio + (float)dx / r.w, 0.1f, 0.9f);
                     } else {
                         int dy = e.motion.y - resize.start_y;
-                        resize.node->ratio =
+                        resize.node->target_ratio =
                             CLAMP(resize.start_ratio + (float)dy / r.h, 0.1f, 0.9f);
                     }
                     continue;
@@ -307,6 +307,28 @@ int main(void) {
                         continue;
                     }
                 }
+                if (input_mode == INPUT_MODE_WM &&
+                        e.type == SDL_KEYDOWN &&
+                        (e.key.keysym.mod & KMOD_CTRL))
+                {
+                    switch (e.key.keysym.sym) {
+                        case SDLK_h:
+                            layout_resize_relative(focused, DIR_LEFT);
+                            break;
+                        case SDLK_l:
+                            layout_resize_relative(focused, DIR_RIGHT);
+                            break;
+                        case SDLK_k:
+                            layout_resize_relative(focused, DIR_UP);
+                            break;
+                        case SDLK_j:
+                            layout_resize_relative(focused, DIR_DOWN);
+                            break;
+                        default:
+                            break;
+                    }
+                    continue;
+                }
                 const char *url = config_startup_url();
                 if(!url) url = "https://www.youtube.com";
                 switch (action) {
@@ -356,6 +378,7 @@ int main(void) {
             }
         }
 
+        layout_animate(root);
         int w, h;
         SDL_GetWindowSize(win, &w, &h);
 
@@ -370,7 +393,6 @@ int main(void) {
 
         SDL_RenderPresent(ren);
     }
-    
     session_save(root,focused);
     layout_destroy(root);
     SDL_DestroyRenderer(ren);

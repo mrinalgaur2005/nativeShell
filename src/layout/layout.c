@@ -1,4 +1,6 @@
-
+#include "core/focus.h"
+#define RESIZE_STEP 0.05f
+#define RESIZE_ANIM_SPEED 0.2f
 #include "layout/layout.h"
 #include "view/debug/debug_view.h"
 #include "view/placeholder/placeholder_view.h"
@@ -50,6 +52,7 @@ LayoutNode *layout_split_node(SplitDirection dir,float ratio) {
     n->type = NODE_SPLIT;
     n->split=dir;
     n->ratio=ratio;
+    n->target_ratio=ratio;
     return n;
 }
 LayoutNode *layout_split_leaf(LayoutNode *leaf,
@@ -241,4 +244,86 @@ void layout_clear(LayoutNode **root, LayoutNode **focused)
     LayoutNode *n = layout_leaf();
     *root = n;
     *focused = n;
+}
+LayoutNode *layout_find_resize_split(
+    LayoutNode *leaf,
+    SplitDirection dir,
+    int *leaf_is_a
+)
+{
+    LayoutNode *n = leaf;
+
+    while (n->parent) {
+        LayoutNode *p = n->parent;
+
+        if (p->type == NODE_SPLIT && p->split == dir) {
+            *leaf_is_a = (p->a == n);
+            return p;
+        }
+        n = p;
+    }
+    return NULL;
+}
+void layout_resize_relative(
+    LayoutNode *focused,
+    FocusDir dir
+)
+{
+    int is_a = 0;
+    LayoutNode *split = NULL;
+    float delta = RESIZE_STEP;
+
+    if (dir == DIR_LEFT || dir == DIR_RIGHT) {
+        split = layout_find_resize_split(
+            focused,
+            SPLIT_VERTICAL,
+            &is_a
+        );
+
+        if (!split) return;
+
+        /* Ctrl+h or Ctrl+l */
+        if (dir == DIR_LEFT) {
+            delta = is_a ? -delta : +delta;
+        } else { /* DIR_RIGHT */
+            delta = is_a ? +delta : -delta;
+        }
+    }
+
+    if (dir == DIR_UP || dir == DIR_DOWN) {
+        split = layout_find_resize_split(
+            focused,
+            SPLIT_HORIZONTAL,
+            &is_a
+        );
+
+        if (!split) return;
+
+        /* Ctrl+k or Ctrl+j */
+        if (dir == DIR_UP) {
+            delta = is_a ? -delta : +delta;
+        } else { /* DIR_DOWN */
+            delta = is_a ? +delta : -delta;
+        }
+    }
+
+    split->target_ratio =
+        CLAMP(split->target_ratio + delta, 0.1f, 0.9f);
+}
+void layout_animate(LayoutNode *node)
+{
+    if (!node) return;
+
+    if (node->type == NODE_SPLIT) {
+        float diff = node->target_ratio - node->ratio;
+
+        if (fabsf(diff) > 0.001f) {
+            node->ratio += diff * RESIZE_ANIM_SPEED;
+        } else {
+            node->ratio = node->target_ratio;
+        }
+    }
+
+    layout_animate(node->a);
+    layout_animate(node->b);
 }

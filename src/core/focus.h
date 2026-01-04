@@ -1,8 +1,9 @@
-
 #pragma once
-#include "layout/layout.h"
 
-typedef enum {
+/* forward declaration */
+typedef struct LayoutNode LayoutNode;
+
+typedef enum FocusDir {
     DIR_LEFT,
     DIR_RIGHT,
     DIR_UP,

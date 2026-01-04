@@ -1,4 +1,4 @@
-
+#include "layout/layout.h"
 #include "focus.h"
 #include <stdbool.h>
 #include <stdlib.h>

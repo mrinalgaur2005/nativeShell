@@ -1,7 +1,11 @@
 
 #pragma once
 #include "view/view.h"
+#include "view/web/web_view.h"
 #include <SDL2/SDL.h>
+
+enum FocusDir;
+typedef enum FocusDir FocusDir ;
 
 #define SPLIT_GRAB_MARGIN 6
 typedef enum {
@@ -26,6 +30,8 @@ typedef struct LayoutNode {
 
     View *view;
     int id;
+
+    float target_ratio;
 } LayoutNode;
 
 typedef struct{
@@ -55,3 +61,7 @@ void layout_destroy(LayoutNode *node);
 LayoutNode *layout_find_leaf_by_id(LayoutNode *root, int id);
 void layout_clear(LayoutNode **root, LayoutNode **focused);
 
+
+LayoutNode *layout_find_resize_split( LayoutNode *leaf, SplitDirection dir, int *leaf_is_a);
+void layout_resize_relative( LayoutNode *focused,FocusDir dir);
+void layout_animate(LayoutNode *node);
