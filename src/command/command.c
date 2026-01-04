@@ -1,4 +1,8 @@
 
+#define DEFAULT_SPLIT_DIR SPLIT_VERTICAL
+#define DEFAULT_SPLIT_RATIO 0.5f
+
+
 #include "command/command.h"
 #include "layout/layout.h"
 #include "view/web/web_view.h"
@@ -12,6 +16,13 @@ static int len = 0;
 static bool active = false;
 
 static void url_encode(const char *in, char *out, size_t out_sz);
+static int is_probable_url(const char *s);
+static int is_probable_url(const char *s)
+{
+    return
+        strstr(s, "://") ||          /* https://, http:// */
+        strncmp(s, "www.", 4) == 0;  /* www.example.com */
+}
 static void url_encode(const char *in, char *out, size_t out_sz)
 {
     size_t j = 0;
@@ -79,42 +90,88 @@ bool cmd_execute(LayoutNode **root, LayoutNode **focused)
     SDL_Log("cmd='%s' arg='%s'", cmd, arg);
 
     /* ---------- open ---------- */
-    if (strcmp(cmd, "open") == 0 || strcmp(cmd, "o")==0) {
-        if (n != 2) {
-            SDL_Log("open: missing URL");
+    if (strcmp(cmd, "open") == 0 ||
+            strcmp(cmd, "o") == 0 ||
+            strcmp(cmd, "search") == 0 ||
+            strcmp(cmd, "s") == 0)
+    {
+        if (!arg[0]) {
+            SDL_Log("%s: missing argument", cmd);
             return false;
+        }
+
+        char final_url[512];
+
+        if (is_probable_url(arg)) {
+
+            /* normalize scheme */
+            if (!strstr(arg, "://")) {
+                snprintf(final_url, sizeof(final_url),
+                        "https://%s", arg);
+            } else {
+                strncpy(final_url, arg, sizeof(final_url));
+            }
+
+        } else {
+            char encoded[256];
+            url_encode(arg, encoded, sizeof(encoded));
+
+            snprintf(final_url, sizeof(final_url),
+                    "https://www.google.com/search?q=%s",
+                    encoded);
         }
 
         LayoutNode *leaf = *focused;
 
         if (leaf->view->type != VIEW_WEB) {
             leaf->view->destroy(leaf->view);
-            leaf->view = web_view_create(arg);
+            leaf->view = web_view_create(final_url);
         } else {
-            web_view_load_url(leaf->view, arg);
+            web_view_load_url(leaf->view, final_url);
         }
 
         return true;
     }
-    if (strcmp(cmd, "search") == 0 || strcmp(cmd, "s") == 0) {
+    //--------------------open new pane------------------
+    if (strcmp(cmd, "new") == 0 || strcmp(cmd, "n") == 0) {
 
-        if (!arg[0]) return false;
+        if (!arg[0])
+            return false;
 
-        char encoded[256];
-        char url[512];
+        LayoutNode *new_leaf =
+            layout_split_leaf(*focused,
+                    DEFAULT_SPLIT_DIR,
+                    DEFAULT_SPLIT_RATIO,
+                    root);
 
-        url_encode(arg, encoded, sizeof(encoded));
+        if (!new_leaf)
+            return false;
 
-        snprintf(url, sizeof(url),
-                "https://www.google.com/search?q=%s",
-                encoded);
+        char final_url[512];
 
-        if ((*focused)->view->type != VIEW_WEB) {
-            (*focused)->view->destroy((*focused)->view);
-            (*focused)->view = web_view_create(url);
+        if (is_probable_url(arg)) {
+
+            if (!strstr(arg, "://")) {
+                snprintf(final_url, sizeof(final_url),
+                        "https://%s", arg);
+            } else {
+                strncpy(final_url, arg, sizeof(final_url));
+            }
+
         } else {
-            web_view_load_url((*focused)->view, url);
+            char encoded[256];
+            url_encode(arg, encoded, sizeof(encoded));
+
+            snprintf(final_url, sizeof(final_url),
+                    "https://www.google.com/search?q=%s",
+                    encoded);
         }
+
+        new_leaf->view->destroy(new_leaf->view);
+        new_leaf->view = web_view_create(final_url);
+
+        *focused = new_leaf;
+
         return true;
     }
 

@@ -29,4 +29,4 @@ void web_view_load_url(View *v,const char *url);
 void web_view_undo(View *v);
 void web_view_redo(View *v);
 void web_view_reload(View *v);
-
+void web_view_stop(View *v);

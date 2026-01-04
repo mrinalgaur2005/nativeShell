@@ -19,7 +19,8 @@ typedef enum {
 
     ACTION_WEB_BACK,
     ACTION_WEB_FORWARD,
-    ACTION_WEB_RELOAD
+    ACTION_WEB_RELOAD,
+    ACTION_WEB_STOP
 } Action;
 
 void config_load(void);

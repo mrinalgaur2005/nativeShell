@@ -379,3 +379,11 @@ void web_view_reload(View *v)
     if (!wv->wk) return;
     webkit_web_view_reload(wv->wk);
 }
+void web_view_stop(View *v){
+    SDL_Log("stopppppp");
+    if(!v)return;
+    WebView *wv = (WebView *)v;
+    if (!wv->wk) return;
+
+    webkit_web_view_stop_loading(wv->wk);
+}

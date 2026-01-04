@@ -306,6 +306,11 @@ int main(void) {
                         web_view_redo(focused->view);
                         continue;
                     }
+                    if (action == ACTION_WEB_STOP)
+                    {
+                        web_view_stop(focused->view);
+                        continue;
+                    }
                 }
                 if (input_mode == INPUT_MODE_WM &&
                         e.type == SDL_KEYDOWN &&
