@@ -11,6 +11,18 @@ static char buffer[256];
 static int len = 0;
 static bool active = false;
 
+static void url_encode(const char *in, char *out, size_t out_sz);
+static void url_encode(const char *in, char *out, size_t out_sz)
+{
+    size_t j = 0;
+    for (size_t i = 0; in[i] && j + 1 < out_sz; i++) {
+        if (in[i] == ' ')
+            out[j++] = '+';
+        else
+            out[j++] = in[i];
+    }
+    out[j] = '\0';
+}
 void cmd_enter(void)
 {
     active = true;
@@ -67,7 +79,7 @@ bool cmd_execute(LayoutNode **root, LayoutNode **focused)
     SDL_Log("cmd='%s' arg='%s'", cmd, arg);
 
     /* ---------- open ---------- */
-    if (strcmp(cmd, "open") == 0) {
+    if (strcmp(cmd, "open") == 0 || strcmp(cmd, "o")==0) {
         if (n != 2) {
             SDL_Log("open: missing URL");
             return false;
@@ -82,6 +94,27 @@ bool cmd_execute(LayoutNode **root, LayoutNode **focused)
             web_view_load_url(leaf->view, arg);
         }
 
+        return true;
+    }
+    if (strcmp(cmd, "search") == 0 || strcmp(cmd, "s") == 0) {
+
+        if (!arg[0]) return false;
+
+        char encoded[256];
+        char url[512];
+
+        url_encode(arg, encoded, sizeof(encoded));
+
+        snprintf(url, sizeof(url),
+                "https://www.google.com/search?q=%s",
+                encoded);
+
+        if ((*focused)->view->type != VIEW_WEB) {
+            (*focused)->view->destroy((*focused)->view);
+            (*focused)->view = web_view_create(url);
+        } else {
+            web_view_load_url((*focused)->view, url);
+        }
         return true;
     }
 
