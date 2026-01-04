@@ -282,11 +282,35 @@ int main(void) {
                     e.key.repeat == 0)
             {
                 Action action = config_action_for_key(e.key.keysym.sym);
-                
+                if (focused && focused->view &&
+                        focused->view->type == VIEW_WEB)
+                {
+                    /* u → back */
+                    if (action == ACTION_WEB_BACK) {
+                        web_view_undo(focused->view);
+                        continue;
+                    }
+
+                    /* r → reload */
+                    if (action == ACTION_WEB_RELOAD &&
+                            !(e.key.keysym.mod & KMOD_CTRL))
+                    {
+                        web_view_reload(focused->view);
+                        continue;
+                    }
+
+                    /* Ctrl+r → forward */
+                    if (action == ACTION_WEB_RELOAD &&
+                            (e.key.keysym.mod & KMOD_CTRL))
+                    {
+                        web_view_redo(focused->view);
+                        continue;
+                    }
+                }
                 const char *url = config_startup_url();
                 if(!url) url = "https://www.youtube.com";
                 switch (action) {
-
+                    
                     case ACTION_SPLIT_VERTICAL:
                         focused = layout_split_leaf(
                                 focused, SPLIT_VERTICAL, 0.5f, &root);

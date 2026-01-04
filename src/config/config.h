@@ -15,7 +15,11 @@ typedef enum {
     ACTION_CLOSE_PANE,
 
     ACTION_OPEN_WEBVIEW,
-    ACTION_ENTER_CMD
+    ACTION_ENTER_CMD,
+
+    ACTION_WEB_BACK,
+    ACTION_WEB_FORWARD,
+    ACTION_WEB_RELOAD
 } Action;
 
 void config_load(void);

@@ -35,6 +35,9 @@ static void config_set_defaults(void)
     cfg.bindings[cfg.binding_count++] = (typeof(cfg.bindings[0])){ SDLK_o, ACTION_OPEN_WEBVIEW };
     cfg.bindings[cfg.binding_count++] = (typeof(cfg.bindings[0])){ SDLK_SEMICOLON, ACTION_ENTER_CMD };
 
+    cfg.bindings[cfg.binding_count++] = (typeof(cfg.bindings[0])){ SDLK_u, ACTION_WEB_BACK };
+    cfg.bindings[cfg.binding_count++] = (typeof(cfg.bindings[0])){ SDLK_r, ACTION_WEB_RELOAD };
+
     cfg.startup_url[0] = '\0';
     cfg.restore_session = 1;
 }
@@ -52,6 +55,8 @@ static Action action_from_string(const char *s)
     if (!strcmp(s, "close_pane")) return ACTION_CLOSE_PANE;
     if (!strcmp(s, "open_webview")) return ACTION_OPEN_WEBVIEW;
     if (!strcmp(s, "enter_cmd")) return ACTION_ENTER_CMD;
+    if (!strcmp(s, "web_back")) return ACTION_WEB_BACK;
+    if (!strcmp(s, "web_reload")) return ACTION_WEB_RELOAD;
     return ACTION_NONE;
 }
 

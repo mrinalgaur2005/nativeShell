@@ -26,3 +26,7 @@ void web_view_handle_mouse(View *v, SDL_MouseButtonEvent *btn,SDL_Rect leaf_rect
 void web_view_handle_motion(View *v, SDL_MouseMotionEvent *motion,SDL_Rect leaf_rec);
 void web_view_handle_wheel(View *v, SDL_MouseWheelEvent *wheel,SDL_Rect leaf_rec);
 void web_view_load_url(View *v,const char *url);
+void web_view_undo(View *v);
+void web_view_redo(View *v);
+void web_view_reload(View *v);
+

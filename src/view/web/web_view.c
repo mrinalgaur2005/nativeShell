@@ -9,6 +9,7 @@
 #include <SDL2/SDL_log.h>
 #include <SDL2/SDL_render.h>
 #include <SDL2/SDL_stdinc.h>
+#include <stdio.h>
 #include <webkit2/webkit2.h>
 #include <stdlib.h>
 
@@ -347,4 +348,34 @@ guess_hardware_keycode(guint keyval)
         case GDK_KEY_Escape:    return 9;
         default:                return 0;
     }
+}
+//------ browser functionality--------
+void web_view_redo(View *v)
+{
+    if (!v) return;
+
+    WebView *wv = (WebView *)v;
+    if (!wv->wk) return;
+
+    if(webkit_web_view_can_go_forward(wv->wk))
+            webkit_web_view_go_forward(wv->wk);
+}
+
+void web_view_undo(View *v)
+{
+    if (!v) return;
+
+    WebView *wv = (WebView *)v;
+    if (!wv->wk) return;
+    if(webkit_web_view_can_go_back(wv->wk))
+            webkit_web_view_go_back(wv->wk);
+    else printf("hello");
+}
+void web_view_reload(View *v)
+{
+    if (!v) return;
+
+    WebView *wv = (WebView *)v;
+    if (!wv->wk) return;
+    webkit_web_view_reload(wv->wk);
 }
