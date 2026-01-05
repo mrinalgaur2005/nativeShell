@@ -14,6 +14,9 @@ SRCS := \
 	$(SRC_DIR)/view/debug/debug_view.c \
 	$(SRC_DIR)/view/view.c \
 	$(SRC_DIR)/view/web/web_view.c \
+	$(SRC_DIR)/view/web/webview_registry.c \
+	$(SRC_DIR)/view/tab/tab_view.c \
+	$(SRC_DIR)/view/tab/tab_view_renderer.c \
 	$(SRC_DIR)/command/command.c \
 	$(SRC_DIR)/command/command_overlay.c \
 	$(SRC_DIR)/core/session.c \

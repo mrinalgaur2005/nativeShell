@@ -4,6 +4,7 @@
 #include "glib-object.h"
 #include "gtk/gtk.h"
 #include "view/view.h"
+#include "view/web/webview_registry.h"
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_keycode.h>
 #include <SDL2/SDL_log.h>
@@ -93,7 +94,9 @@ static void destroy(View *v)
 
     if (wv->wk)
         g_object_unref(wv->wk);
-
+    tab_registry_remove(v);
+    webkit_web_view_stop_loading(wv->wk);
+    gtk_widget_destroy(GTK_WIDGET(wv->wk));
     free(wv);
 }
 
@@ -108,7 +111,7 @@ View *web_view_create(const char *url)
 
     wv->offscreen = gtk_offscreen_window_new();
     gtk_widget_set_size_request(wv->offscreen, 800, 600);
-
+    tab_registry_add((View *)wv);
     wv->wk = WEBKIT_WEB_VIEW(webkit_web_view_new());
     gtk_container_add(GTK_CONTAINER(wv->offscreen), GTK_WIDGET(wv->wk));
     gtk_widget_show_all(wv->offscreen);
@@ -386,4 +389,19 @@ void web_view_stop(View *v){
     if (!wv->wk) return;
 
     webkit_web_view_stop_loading(wv->wk);
+}
+void web_view_close(View *v)
+{
+    WebView *wv = (WebView *)v;
+    if (!wv) return;
+
+    tab_registry_remove(v);
+
+    webkit_web_view_stop_loading(wv->wk);
+
+    gtk_widget_destroy(GTK_WIDGET(wv->wk));
+    gtk_widget_destroy(wv->offscreen);
+
+    free(wv->url);
+    free(wv);
 }

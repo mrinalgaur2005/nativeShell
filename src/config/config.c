@@ -41,6 +41,7 @@ static void config_set_defaults(void)
 
     cfg.bindings[cfg.binding_count++] = (typeof(cfg.bindings[0])){ SDLK_PERIOD, ACTION_WEB_STOP };
 
+    cfg.bindings[cfg.binding_count++] = (typeof(cfg.bindings[0])){ SDLK_t, ACTION_TAB_ENTER };
     cfg.startup_url[0] = '\0';
     cfg.restore_session = 1;
 }
@@ -61,6 +62,7 @@ static Action action_from_string(const char *s)
     if (!strcmp(s, "web_back")) return ACTION_WEB_BACK;
     if (!strcmp(s, "web_reload")) return ACTION_WEB_RELOAD;
     if (!strcmp(s, "web_stop")) return ACTION_WEB_STOP;
+    if (!strcmp(s, "tab_enter")) return ACTION_TAB_ENTER;
     return ACTION_NONE;
 }
 

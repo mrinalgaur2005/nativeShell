@@ -16,8 +16,11 @@
 #include "layout/layout.h"
 #include "render/render.h"
 #include "core/session.h"
+#include "view/placeholder/placeholder_view.h"
+#include "view/tab/tab_view.h"
 #include "view/view.h"
 #include "view/web/web_view.h"
+#include "view/web/webview_registry.h"
 
 typedef struct {
     bool active;
@@ -186,7 +189,7 @@ int main(void) {
             }
 
             /* ---------- Mode switching ---------- */
-            if (e.type == SDL_KEYDOWN && !e.key.repeat) {
+            if (e.type == SDL_KEYDOWN && !e.key.repeat && focused->view->type != VIEW_TAB) {
 
                 if (e.key.keysym.sym == SDLK_ESCAPE) {
                     input_mode = INPUT_MODE_WM;
@@ -281,63 +284,100 @@ int main(void) {
                     e.type == SDL_KEYDOWN &&
                     e.key.repeat == 0)
             {
+                if (focused &&
+                        focused->view &&
+                        focused->view->type == VIEW_TAB)
+                {
+                    tab_view_handle_key(focused->view, &e.key);
+
+                    TabAction act = tab_view_take_action(focused->view);
+
+                    switch (act) {
+
+                        case TAB_EXIT: {
+                                           LayoutNode *tab_leaf = focused;
+
+                                           /* Explicitly destroy TabView */
+                                           View *tab_view = tab_leaf->view;
+                                           tab_leaf->view = NULL;
+
+                                           LayoutNode *new_focus = layout_close_leaf(tab_leaf, &root);
+                                           focused = layout_leaf_from_node(new_focus);
+                                           if (!focused)
+                                               focused = layout_first_leaf(root);
+
+                                           input_mode = INPUT_MODE_WM;
+                                           continue;
+                                       }
+
+                        case TAB_ATTACH: {
+                                             WebViewEntry *entry =
+                                                 tab_registry_get(tab_view_selected(focused->view));
+
+                                             if (entry && entry->alive) {
+                                                 View *old_tab = focused->view;
+                                                 focused->view = entry->view;
+                                                 old_tab->destroy(old_tab);
+                                             }
+
+                                             input_mode = INPUT_MODE_WM;
+                                             continue;
+                                         }
+
+                        case TAB_CLOSE:
+                                         tab_view_close_selected(root, focused->view);
+                                         continue;
+
+                        default:
+                                         continue;
+                    }
+                }
+
+                /* ========== WEBVIEW COMMANDS ========== */
                 Action action = config_action_for_key(e.key.keysym.sym);
+
                 if (focused && focused->view &&
                         focused->view->type == VIEW_WEB)
                 {
-                    /* u → back */
                     if (action == ACTION_WEB_BACK) {
                         web_view_undo(focused->view);
                         continue;
                     }
 
-                    /* r → reload */
                     if (action == ACTION_WEB_RELOAD &&
-                            !(e.key.keysym.mod & KMOD_CTRL))
-                    {
+                            !(e.key.keysym.mod & KMOD_CTRL)) {
                         web_view_reload(focused->view);
                         continue;
                     }
 
-                    /* Ctrl+r → forward */
                     if (action == ACTION_WEB_RELOAD &&
-                            (e.key.keysym.mod & KMOD_CTRL))
-                    {
+                            (e.key.keysym.mod & KMOD_CTRL)) {
                         web_view_redo(focused->view);
                         continue;
                     }
-                    if (action == ACTION_WEB_STOP)
-                    {
+
+                    if (action == ACTION_WEB_STOP) {
                         web_view_stop(focused->view);
                         continue;
                     }
                 }
-                if (input_mode == INPUT_MODE_WM &&
-                        e.type == SDL_KEYDOWN &&
-                        (e.key.keysym.mod & KMOD_CTRL))
-                {
+
+                /* ========== RESIZE (CTRL + HJKL) ========== */
+                if (e.key.keysym.mod & KMOD_CTRL) {
                     switch (e.key.keysym.sym) {
-                        case SDLK_h:
-                            layout_resize_relative(focused, DIR_LEFT);
-                            break;
-                        case SDLK_l:
-                            layout_resize_relative(focused, DIR_RIGHT);
-                            break;
-                        case SDLK_k:
-                            layout_resize_relative(focused, DIR_UP);
-                            break;
-                        case SDLK_j:
-                            layout_resize_relative(focused, DIR_DOWN);
-                            break;
-                        default:
-                            break;
+                        case SDLK_h: layout_resize_relative(focused, DIR_LEFT);  break;
+                        case SDLK_l: layout_resize_relative(focused, DIR_RIGHT); break;
+                        case SDLK_k: layout_resize_relative(focused, DIR_UP);    break;
+                        case SDLK_j: layout_resize_relative(focused, DIR_DOWN);  break;
                     }
                     continue;
                 }
-                const char *url = config_startup_url();
+
+                /* ========== WINDOW MANAGER ACTIONS ========== */
+                const char *url = config_startup_url(); 
                 if(!url) url = "https://www.youtube.com";
                 switch (action) {
-                    
+
                     case ACTION_SPLIT_VERTICAL:
                         focused = layout_split_leaf(
                                 focused, SPLIT_VERTICAL, 0.5f, &root);
@@ -377,8 +417,20 @@ int main(void) {
                         input_mode = INPUT_MODE_CMD;
                         break;
 
+                    case ACTION_TAB_ENTER: {
+                                               int w, h;
+                                               SDL_GetWindowSize(win, &w, &h);
+
+                                               LayoutNode *tab_leaf = layout_insert_tabview(&root, w);
+                                               if (tab_leaf) {
+                                                   focused = tab_leaf;
+                                                   input_mode = INPUT_MODE_WM;
+                                               }
+                                               break;
+                                           }
+
                     default:
-                        break;
+                                           break;
                 }
             }
         }

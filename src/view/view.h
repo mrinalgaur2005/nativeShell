@@ -5,7 +5,8 @@
 typedef enum {
     VIEW_PLACEHOLDER,
     VIEW_DEBUG,
-    VIEW_WEB
+    VIEW_WEB,
+    VIEW_TAB
 } ViewType;
 typedef struct View View;
 

@@ -65,3 +65,9 @@ void layout_clear(LayoutNode **root, LayoutNode **focused);
 LayoutNode *layout_find_resize_split( LayoutNode *leaf, SplitDirection dir, int *leaf_is_a);
 void layout_resize_relative( LayoutNode *focused,FocusDir dir);
 void layout_animate(LayoutNode *node);
+void layout_detach_view_everywhere(LayoutNode *root, View *view);
+void layout_detach_view(LayoutNode *node, View *view);
+LayoutNode *layout_find_view(LayoutNode *root, ViewType type);
+LayoutNode *layout_insert_tabview(LayoutNode **root, int window_width);
+
+LayoutNode *layout_leaf_from_node(LayoutNode *n);

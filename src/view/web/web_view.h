@@ -30,3 +30,4 @@ void web_view_undo(View *v);
 void web_view_redo(View *v);
 void web_view_reload(View *v);
 void web_view_stop(View *v);
+void web_view_close(View *v);

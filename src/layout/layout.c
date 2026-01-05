@@ -1,4 +1,7 @@
 #include "core/focus.h"
+#include "view/tab/tab_view.h"
+#include "view/view.h"
+#include "view/web/web_view.h"
 #define RESIZE_STEP 0.05f
 #define RESIZE_ANIM_SPEED 0.2f
 #include "layout/layout.h"
@@ -10,6 +13,7 @@
 #include <stdlib.h>
 #include <wchar.h>
 
+static void detach_cb(LayoutNode *leaf,void *ud);
 static int next_leaf_id =1;
 typedef struct {
     int x;
@@ -19,6 +23,19 @@ typedef struct {
 int layout_next_leaf_id(void)
 {
     return next_leaf_id++;
+}
+void layout_detach_view(LayoutNode *node, View *view)
+{
+    if (!node) return;
+
+    if (node->type == NODE_LEAF && node->view == view) {
+        SDL_Color c = { 80 + node->id * 20, 120, 160, 255 };
+        node->view = placeholder_view_create(c);
+        return;
+    }
+
+    layout_detach_view(node->a, view);
+    layout_detach_view(node->b, view);
 }
 
 void layout_reset_leaf_ids(int start)
@@ -38,21 +55,22 @@ static void leaf_hit_test(LayoutNode *n, void *ud)
         t->hit = n;
     }
 }
-LayoutNode *layout_leaf(void) {
+LayoutNode *layout_leaf(void){
     LayoutNode *n = calloc(1, sizeof(LayoutNode));
     n->type = NODE_LEAF;
     n->id = next_leaf_id++;
-    SDL_Color color = { 80 + n->id * 20, 120, 160, 255 };
-    n->view = placeholder_view_create(color);
+    n->ratio = 0.5f;
+    n->target_ratio = 0.5f;
+    n->view = placeholder_view_create((SDL_Color){80,80,80,255});
     return n;
 }
 
-LayoutNode *layout_split_node(SplitDirection dir,float ratio) {
+LayoutNode *layout_split_node(SplitDirection dir, float ratio){
     LayoutNode *n = calloc(1, sizeof(LayoutNode));
     n->type = NODE_SPLIT;
-    n->split=dir;
-    n->ratio=ratio;
-    n->target_ratio=ratio;
+    n->split = dir;
+    n->ratio = ratio;
+    n->target_ratio = ratio;
     return n;
 }
 LayoutNode *layout_split_leaf(LayoutNode *leaf,
@@ -112,13 +130,16 @@ LayoutNode *layout_close_leaf(LayoutNode *leaf, LayoutNode **root)
     if (grandparent) {
         if (grandparent->a == split)
             grandparent->a = survivor;
-        else if (grandparent->b == split)
+        else
             grandparent->b = survivor;
     } else {
         *root = survivor;
     }
 
     survivor->parent = grandparent;
+
+    /* DO NOT destroy leaf->view here */
+    leaf->view = NULL;
 
     free(leaf);
     free(split);
@@ -194,7 +215,8 @@ void layout_destroy(LayoutNode *node) {
     if (!node) return;
     layout_destroy(node->a);
     layout_destroy(node->b);
-    if(node->view)node->view->destroy(node->view);
+    if (node->view && node->view->type != VIEW_WEB)
+        node->view->destroy(node->view);
     free(node);
 }
 bool hit_test_split(LayoutNode *node, int x, int y, SplitHit *out)
@@ -326,4 +348,95 @@ void layout_animate(LayoutNode *node)
 
     layout_animate(node->a);
     layout_animate(node->b);
+}
+static void detach_cb(LayoutNode *leaf, void *ud)
+{
+    View *target = ud;
+
+    if (leaf->type != NODE_LEAF)
+        return;
+
+    if (leaf->view == target) {
+        /* replace with placeholder */
+        leaf->view = placeholder_view_create(
+            (SDL_Color){80, 80, 80, 255}
+        );
+    }
+}
+
+void layout_detach_view_everywhere(LayoutNode *n, View *v)
+{
+    if (!n) return;
+
+    if (n->type == NODE_LEAF && n->view == v) {
+        /* destroy old non-web view if any */
+        if (n->view && n->view->type != VIEW_WEB)
+            n->view->destroy(n->view);
+
+        n->view = placeholder_view_create((SDL_Color){80,80,80,255});
+        return;
+    }
+
+    layout_detach_view_everywhere(n->a, v);
+    layout_detach_view_everywhere(n->b, v);
+}
+LayoutNode *layout_find_view(LayoutNode *n, ViewType type)
+{
+    if (!n) return NULL;
+
+    if (n->type == NODE_LEAF && n->view && n->view->type == type)
+        return n;
+
+    LayoutNode *r = layout_find_view(n->a, type);
+    if (r) return r;
+
+    return layout_find_view(n->b, type);
+}
+LayoutNode *layout_insert_tabview(LayoutNode **root, int window_width)
+{
+    if (!root || !*root)
+        return NULL;
+
+    /* If TabView already exists, just return it */
+    LayoutNode *existing = layout_find_view(*root, VIEW_TAB);
+    if (existing)
+        return existing;
+
+    LayoutNode *old_root = *root;
+    old_root->parent = NULL;
+
+    LayoutNode *split = layout_split_node(SPLIT_VERTICAL, 0.25f);
+
+    LayoutNode *tab_leaf = layout_leaf();
+
+    if (tab_leaf->view)
+        tab_leaf->view->destroy(tab_leaf->view);
+    tab_leaf->view = tab_view_create();
+
+    split->a = tab_leaf;
+    split->b = old_root;
+
+    tab_leaf->parent = split;
+    old_root->parent = split;
+
+    /* Fixed-width tab rail (220px) */
+    float ratio = 220.0f / (float)window_width;
+    if (ratio < 0.1f) ratio = 0.1f;
+    if (ratio > 0.35f) ratio = 0.35f;
+
+    split->ratio = ratio;
+    split->target_ratio = ratio;
+    split->parent = NULL;
+
+    *root = split;
+    return tab_leaf;
+}
+LayoutNode *layout_leaf_from_node(LayoutNode *n)
+{
+    if (!n) return NULL;
+
+    while (n->type != NODE_LEAF)
+        n = n->a;
+
+    return n;
 }
