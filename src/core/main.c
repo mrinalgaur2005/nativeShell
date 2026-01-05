@@ -297,7 +297,6 @@ int main(void) {
                         case TAB_EXIT: {
                                            LayoutNode *tab_leaf = focused;
 
-                                           /* Explicitly destroy TabView */
                                            View *tab_view = tab_leaf->view;
                                            tab_leaf->view = NULL;
 
