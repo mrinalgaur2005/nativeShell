@@ -313,14 +313,38 @@ int main(void) {
                                              WebViewEntry *entry =
                                                  tab_registry_get(tab_view_selected(focused->view));
 
-                                             if (entry && entry->alive) {
-                                                 View *old_tab = focused->view;
-                                                 focused->view = entry->view;
-                                                 old_tab->destroy(old_tab);
+                                             if (!entry || !entry->alive)
+                                                 break;
+
+                                             LayoutNode *existing =
+                                                 layout_find_view(root, entry->view);
+
+                                             if (existing) {
+                                                 focused = existing;
+                                                 input_mode = INPUT_MODE_VIEW;
+                                                 break;
                                              }
 
-                                             input_mode = INPUT_MODE_WM;
-                                             continue;
+
+                                             LayoutNode *tab_leaf = focused;
+                                             LayoutNode *content_leaf =
+                                                 layout_close_leaf(tab_leaf, &root);
+
+                                             if (!content_leaf || content_leaf->type != NODE_LEAF)
+                                                 break;
+
+                                             LayoutNode *new_leaf =
+                                                 layout_split_leaf(
+                                                         content_leaf,
+                                                         SPLIT_VERTICAL,
+                                                         0.5f,
+                                                         &root
+                                                         );
+
+                                             new_leaf->view = entry->view;
+                                             focused = new_leaf;
+                                             input_mode = INPUT_MODE_VIEW;
+                                             break;
                                          }
 
                         case TAB_CLOSE:
@@ -388,7 +412,11 @@ int main(void) {
                         break;
 
                     case ACTION_CLOSE_PANE:
-                        focused = layout_close_leaf(focused, &root);
+                        SDL_Log("just merged panes");
+                        LayoutNode *new_focus = layout_close_leaf(focused, &root);
+                        focused = layout_leaf_from_node(new_focus);
+                        if (!focused)
+                            focused = layout_first_leaf(root);
                         break;
 
                     case ACTION_FOCUS_LEFT:

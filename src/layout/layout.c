@@ -24,18 +24,19 @@ int layout_next_leaf_id(void)
 {
     return next_leaf_id++;
 }
-void layout_detach_view(LayoutNode *node, View *view)
+void layout_detach_view(LayoutNode *n, View *v)
 {
-    if (!node) return;
+    if (!n) return;
 
-    if (node->type == NODE_LEAF && node->view == view) {
-        SDL_Color c = { 80 + node->id * 20, 120, 160, 255 };
-        node->view = placeholder_view_create(c);
+    if (n->type == NODE_LEAF && n->view == v) {
+        n->view = placeholder_view_create(
+            (SDL_Color){80, 80, 80, 255}
+        );
         return;
     }
 
-    layout_detach_view(node->a, view);
-    layout_detach_view(node->b, view);
+    layout_detach_view(n->a, v);
+    layout_detach_view(n->b, v);
 }
 
 void layout_reset_leaf_ids(int start)
@@ -380,56 +381,17 @@ void layout_detach_view_everywhere(LayoutNode *n, View *v)
     layout_detach_view_everywhere(n->a, v);
     layout_detach_view_everywhere(n->b, v);
 }
-LayoutNode *layout_find_view(LayoutNode *n, ViewType type)
+LayoutNode *layout_find_view(LayoutNode *n,View *v)
 {
     if (!n) return NULL;
 
-    if (n->type == NODE_LEAF && n->view && n->view->type == type)
+    if (n->type == NODE_LEAF && n->view == v)
         return n;
 
-    LayoutNode *r = layout_find_view(n->a, type);
+    LayoutNode *r = layout_find_view(n->a, v);
     if (r) return r;
 
-    return layout_find_view(n->b, type);
-}
-LayoutNode *layout_insert_tabview(LayoutNode **root, int window_width)
-{
-    if (!root || !*root)
-        return NULL;
-
-    /* If TabView already exists, just return it */
-    LayoutNode *existing = layout_find_view(*root, VIEW_TAB);
-    if (existing)
-        return existing;
-
-    LayoutNode *old_root = *root;
-    old_root->parent = NULL;
-
-    LayoutNode *split = layout_split_node(SPLIT_VERTICAL, 0.25f);
-
-    LayoutNode *tab_leaf = layout_leaf();
-
-    if (tab_leaf->view)
-        tab_leaf->view->destroy(tab_leaf->view);
-    tab_leaf->view = tab_view_create();
-
-    split->a = tab_leaf;
-    split->b = old_root;
-
-    tab_leaf->parent = split;
-    old_root->parent = split;
-
-    /* Fixed-width tab rail (220px) */
-    float ratio = 220.0f / (float)window_width;
-    if (ratio < 0.1f) ratio = 0.1f;
-    if (ratio > 0.35f) ratio = 0.35f;
-
-    split->ratio = ratio;
-    split->target_ratio = ratio;
-    split->parent = NULL;
-
-    *root = split;
-    return tab_leaf;
+    return layout_find_view(n->b, v);
 }
 LayoutNode *layout_leaf_from_node(LayoutNode *n)
 {
@@ -439,4 +401,54 @@ LayoutNode *layout_leaf_from_node(LayoutNode *n)
         n = n->a;
 
     return n;
+}
+LayoutNode *layout_find_view_type(LayoutNode *n, ViewType type)
+{
+    if (!n)
+        return NULL;
+
+    if (n->type == NODE_LEAF &&
+        n->view &&
+        n->view->type == type)
+        return n;
+
+    LayoutNode *hit = layout_find_view_type(n->a, type);
+    if (hit) return hit;
+
+    return layout_find_view_type(n->b, type);
+}
+LayoutNode *layout_insert_tabview(LayoutNode **root, int window_width)
+{
+    if (!root || !*root)
+        return NULL;
+
+    LayoutNode *existing = layout_find_view_type(*root, VIEW_TAB);
+    if (existing)
+        return existing;
+
+    LayoutNode *old_root = *root;
+
+    LayoutNode *split = layout_split_node(SPLIT_VERTICAL, 0.25f);
+    LayoutNode *tab_leaf = layout_leaf();
+    LayoutNode *content = old_root;
+
+    split->a = tab_leaf;
+    split->b = content;
+
+    tab_leaf->parent = split;
+    content->parent = split;
+
+    split->parent = NULL;
+    *root = split;
+
+    float ratio = 220.0f / (float)window_width;
+    if (ratio < 0.1f)  ratio = 0.1f;
+    if (ratio > 0.35f) ratio = 0.35f;
+
+    split->ratio = ratio;
+    split->target_ratio = ratio;
+
+    tab_leaf->view = tab_view_create();
+
+    return tab_leaf;
 }

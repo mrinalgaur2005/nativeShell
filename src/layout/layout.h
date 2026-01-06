@@ -67,7 +67,8 @@ void layout_resize_relative( LayoutNode *focused,FocusDir dir);
 void layout_animate(LayoutNode *node);
 void layout_detach_view_everywhere(LayoutNode *root, View *view);
 void layout_detach_view(LayoutNode *node, View *view);
-LayoutNode *layout_find_view(LayoutNode *root, ViewType type);
+LayoutNode *layout_find_view(LayoutNode *root,View *v);
 LayoutNode *layout_insert_tabview(LayoutNode **root, int window_width);
 
 LayoutNode *layout_leaf_from_node(LayoutNode *n);
+LayoutNode *layout_find_view_type(LayoutNode *root, ViewType type);
