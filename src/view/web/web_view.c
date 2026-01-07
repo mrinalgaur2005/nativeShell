@@ -21,7 +21,51 @@ static void web_view_ensure_texture(WebView *wv,SDL_Renderer *renderer);
 static GdkDevice *get_pointer_device(GtkWidget *widget);
 static GdkDevice *get_keyboard_device(GtkWidget *widget);
 
+static void on_title_changed(WebKitWebView *wk,
+                             GParamSpec *pspec,
+                             gpointer userdata);
+static void on_load_changed(WebKitWebView *wk,
+                            WebKitLoadEvent ev,
+                            gpointer userdata);
 static guint guess_hardware_keycode(guint keyval);
+
+
+
+
+static void
+on_load_changed(WebKitWebView *wk,
+                WebKitLoadEvent event,
+                gpointer user_data)
+{
+    WebView *wv = (WebView *)user_data;
+    if (!wv) return;
+
+    switch (event) {
+
+        case WEBKIT_LOAD_STARTED:
+            tab_registry_set_loading((View *)wv, 1);
+            break;
+
+
+        case WEBKIT_LOAD_FINISHED:
+            {
+                tab_registry_set_loading((View *)wv, 0);
+
+                const char *title = webkit_web_view_get_title(wk);
+                if (title)
+                    tab_registry_set_title((View *)wv, title);
+
+                /* ask registry to handle visuals */
+                tab_registry_request_snapshot((View *)wv);
+                break;
+            }
+
+        default:
+            break;
+    }
+}
+
+
 static void draw(View *v,
                  SDL_Renderer *renderer,
                  SDL_Rect rect,
@@ -31,6 +75,8 @@ static void draw(View *v,
     (void)focused;
 
     web_view_ensure_surface(wv, rect.w, rect.h);
+    WebKitWebContext *ctx = webkit_web_context_get_default();
+    webkit_web_context_set_favicon_database_directory(ctx, NULL);
 
     gtk_widget_set_size_request(wv->offscreen, rect.w, rect.h);
 
@@ -80,10 +126,36 @@ static void web_view_ensure_texture(WebView *wv,SDL_Renderer *renderer){
 
     SDL_SetTextureBlendMode(wv->texture, SDL_BLENDMODE_BLEND);
 }
+const char *web_view_get_title(View *v)
+{
+    if (!v || v->type != VIEW_WEB)
+        return NULL;
+
+    WebView *wv = (WebView *)v;
+
+    const char *title = webkit_web_view_get_title(wv->wk);
+    if (title && *title)
+        return title;
+
+    return wv->url;  /* fallback */
+}
+
 const char *web_view_get_url(View *v)
 {
+    if (!v || v->type != VIEW_WEB)
+        return NULL;
+
     WebView *wv = (WebView *)v;
-    return wv->url ? wv->url : "";
+    return wv->url;
+}
+
+int web_view_is_loading(View *v)
+{
+    if (!v || v->type != VIEW_WEB)
+        return 0;
+
+    WebView *wv = (WebView *)v;
+    return webkit_web_view_is_loading(wv->wk);
 }
 static void destroy(View *v)
 {
@@ -103,19 +175,39 @@ static void destroy(View *v)
 View *web_view_create(const char *url)
 {
     WebView *wv = calloc(1, sizeof(WebView));
-    wv->base.type=VIEW_WEB;
+
+    wv->base.type = VIEW_WEB;
     wv->base.draw = draw;
     wv->base.destroy = destroy;
 
-    wv->url = strdup(url);   // <-- STORE URL
+    wv->url = strdup(url);
 
+    /* ---- GTK objects FIRST ---- */
     wv->offscreen = gtk_offscreen_window_new();
     gtk_widget_set_size_request(wv->offscreen, 800, 600);
-    tab_registry_add((View *)wv);
+
     wv->wk = WEBKIT_WEB_VIEW(webkit_web_view_new());
-    gtk_container_add(GTK_CONTAINER(wv->offscreen), GTK_WIDGET(wv->wk));
+    gtk_container_add(GTK_CONTAINER(wv->offscreen),
+                      GTK_WIDGET(wv->wk));
     gtk_widget_show_all(wv->offscreen);
 
+    /* ---- registry AFTER wk exists ---- */
+    int idx = tab_registry_add((View *)wv);
+    if (idx >= 0) {
+        WebViewEntry *e = tab_registry_get(idx);
+        strncpy(e->url, url, sizeof(e->url) - 1);
+        e->loading = 1;
+        e->title[0] = '\0';   /* important */
+    }
+    /* ---- NOW connect signals ---- */
+    g_signal_connect(
+            wv->wk,
+            "load-changed",
+            G_CALLBACK(on_load_changed),
+            wv
+            );
+
+    /* ---- load ---- */
     webkit_web_view_load_uri(wv->wk, url);
 
     return (View *)wv;

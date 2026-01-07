@@ -1,6 +1,7 @@
 #include "tab_view.h"
 #include "SDL_keycode.h"
 #include "SDL_log.h"
+#include "SDL_ttf.h"
 #include "layout/layout.h"
 #include "view/web/web_view.h"
 #include "view/web/webview_registry.h"
@@ -17,15 +18,69 @@ static void tab_draw(View *self,
 static void tab_key(View *self, SDL_KeyboardEvent *e);
 static void tab_destroy(View *self);
 
+static const char *tab_label(WebViewEntry *e);
+
+static void draw_text(SDL_Renderer *r,
+                      const char *text,
+                      int x, int y,
+                      int max_w);
 /* ---------- create ---------- */
 
+
+static TTF_Font *tab_font = NULL;
+
+void tab_view_init(void)
+{
+    tab_font = TTF_OpenFont(
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        14
+    );
+
+    if (!tab_font)
+        SDL_Log("TTF font load failed: %s", TTF_GetError());
+}
 
 typedef struct {
     View base;
     int selected;
     TabAction action;
 } TabView;
+/*-----------------helpers----------*/
+static const char *tab_label(WebViewEntry *e)
+{
+    if (e->title[0])
+        return e->title;
 
+    if (e->url[0])
+        return e->url;
+
+    return "(untitled)";
+}
+static void draw_text(SDL_Renderer *r,
+                      const char *text,
+                      int x, int y,
+                      int max_w)
+{
+    if (!tab_font || !text || !*text)
+        return;
+
+    SDL_Color fg = {255, 255, 255, 255};
+
+    SDL_Surface *s =
+        TTF_RenderUTF8_Blended(tab_font, text, fg);
+    if (!s) return;
+
+    SDL_Texture *t = SDL_CreateTextureFromSurface(r, s);
+
+    SDL_Rect dst = { x, y, s->w, s->h };
+    if (dst.w > max_w)
+        dst.w = max_w;
+
+    SDL_RenderCopy(r, t, NULL, &dst);
+
+    SDL_FreeSurface(s);
+    SDL_DestroyTexture(t);
+}
 /* ---------------- create ---------------- */
 
 View *tab_view_create(void)
@@ -103,27 +158,47 @@ static void tab_draw(View *self,
 {
     TabView *tv = (TabView *)self;
 
-    SDL_SetRenderDrawColor(r, 22, 22, 22, 255);
+    /* background */
+    SDL_SetRenderDrawColor(r, 24, 24, 24, 255);
     SDL_RenderFillRect(r, &rect);
 
-    int y = rect.y + 10;
-    int line_h = 22;
+    int y = rect.y + 8;
+    int line_h = 28;
 
     for (int i = 0; i < tab_registry_count(); i++) {
-        WebViewEntry *e = tab_registry_get(i);
-        if (!e) continue;
 
+        WebViewEntry *e = tab_registry_get(i);
+        if (!e || !e->alive || !e->view)
+            continue;
+
+        /* selected row */
         if (i == tv->selected) {
-            SDL_SetRenderDrawColor(r, 60, 60, 140, 255);
-            SDL_Rect sel = { rect.x, y - 2, rect.w, line_h };
+            SDL_SetRenderDrawColor(r, 60, 90, 160, 255);
+            SDL_Rect sel = {
+                rect.x,
+                y - 2,
+                rect.w,
+                line_h
+            };
             SDL_RenderFillRect(r, &sel);
         }
 
-        /* placeholder text marker */
-        SDL_SetRenderDrawColor(r, 200, 200, 200, 255);
-        SDL_RenderDrawLine(r,
-            rect.x + 10, y + line_h / 2,
-            rect.x + rect.w - 10, y + line_h / 2);
+        /* title (fallback to URL) */
+        const char *title = web_view_get_title(e->view);
+        SDL_Log("HEY TITLE IS %s",title);
+        if (!title || !*title)
+            title = web_view_get_url(e->view);
+
+        if (!title)
+            title = "(untitled)";
+
+        draw_text(
+            r,
+            title,
+            rect.x + 28,
+            y + 5,
+            rect.w - 36
+        );
 
         y += line_h;
     }

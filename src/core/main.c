@@ -1,7 +1,9 @@
+#include "SDL_ttf.h"
 #include "command/command.h"
 #include "command/command_overlay.h"
 #include "config/config.h"
 #include "focus.h"
+#include <webkit2/webkit2.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_keycode.h>
@@ -74,9 +76,19 @@ void cmd_open_webview(LayoutNode *leaf,const char *url){
 int main(void) {
     gtk_init(NULL,NULL);
     SDL_Init(SDL_INIT_VIDEO);
-    cmd_overlay_init();
-    config_load();
+    WebKitWebContext *ctx = webkit_web_context_get_default();
 
+    const char *cache_dir = g_get_user_cache_dir();
+    char path[512];
+    snprintf(path, sizeof(path), "%s/nativeshell-favicons", cache_dir);
+    webkit_web_context_set_favicon_database_directory(ctx, path);
+
+    if (TTF_Init() != 0) {
+        SDL_Log("TTF init failed: %s", TTF_GetError());
+    }
+    cmd_overlay_init();
+    tab_view_init();
+    config_load();
     SDL_Cursor *cursor_we = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
     SDL_Cursor *cursor_ns = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
     SDL_Cursor *cursor_arrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
@@ -92,6 +104,7 @@ int main(void) {
             win, -1,
             SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
             );
+    tab_registry_init(ren);
 
     LayoutNode *focused = NULL;
     LayoutNode *root = NULL;

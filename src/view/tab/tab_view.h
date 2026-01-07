@@ -9,6 +9,7 @@ typedef enum {
     TAB_EXIT
 } TabAction;
 
+void tab_view_init(void);
 /* lifecycle */
 View *tab_view_create(void);
 
