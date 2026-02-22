@@ -209,9 +209,10 @@ int main(void) {
         last_pane = layout_find_view_type(root, VIEW_PANE);
     bool running = true;
     SDL_Event e;
-
+    session_register(root,focused); 
     while (running) {
 
+        session_autosave_tick();
         /* ---- GTK pump (non-blocking) ---- */
         while (gtk_events_pending())
             gtk_main_iteration();

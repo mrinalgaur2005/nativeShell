@@ -13,6 +13,13 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <signal.h>
+#include <time.h>
+
+static LayoutNode *g_root = NULL;
+static LayoutNode *g_focused = NULL;
+static int g_autosave_interval_sec = 30;
+static volatile sig_atomic_t g_should_exit = 0;
 
 
 static const char *session_path(void)
@@ -29,8 +36,9 @@ static const char *session_path(void)
 static void ensure_session_dir(void)
 {
     const char *home = getenv("HOME");
-    char dir[512];
+    if (!home) return;
 
+    char dir[512];
     snprintf(dir, sizeof(dir),
              "%s/.local/share/nativeshell", home);
 
@@ -99,9 +107,12 @@ static void save_node_json(FILE *f, LayoutNode *n, int indent)
 
 void session_save(LayoutNode *root, LayoutNode *focused)
 {
-    ensure_session_dir();
+    if (!root) return;
 
+    ensure_session_dir();
     const char *path = session_path();
+    if (!path) return;
+
     FILE *f = fopen(path, "w");
     if (!f) return;
 
@@ -115,6 +126,7 @@ void session_save(LayoutNode *root, LayoutNode *focused)
         WebView *web = tab_manager_webview_at(i);
         TabEntry *e = tab_manager_entry_at(i);
         const char *url = NULL;
+
         if (e && e->url[0])
             url = e->url;
         if (!url)
@@ -136,6 +148,27 @@ void session_save(LayoutNode *root, LayoutNode *focused)
 }
 
 
+static int session_validate_json(cJSON *root_json)
+{
+    if (!root_json) return 0;
+
+    cJSON *focused = cJSON_GetObjectItem(root_json, "focused");
+    cJSON *webviews = cJSON_GetObjectItem(root_json, "webviews");
+    cJSON *tree = cJSON_GetObjectItem(root_json, "tree");
+
+    if (!focused || !cJSON_IsNumber(focused))
+        return 0;
+
+    if (!webviews || !cJSON_IsArray(webviews))
+        return 0;
+
+    if (!tree || !cJSON_IsObject(tree))
+        return 0;
+
+    return 1;
+}
+
+
 static LayoutNode *load_node_cjson(
     cJSON *jnode,
     LayoutNode *parent,
@@ -152,7 +185,7 @@ static LayoutNode *load_node_cjson(
             cJSON_GetObjectItem(jnode, "id")->valueint;
 
         LayoutNode *n = layout_leaf();
-        n->id = saved_id; 
+        n->id = saved_id;
         n->parent = parent;
 
         if (saved_id > *max_id)
@@ -174,14 +207,12 @@ static LayoutNode *load_node_cjson(
                 if (att)
                     attached = att->valueint;
             }
-            if (attached >= 0 && attached < web_count) {
+            if (attached >= 0 && attached < web_count)
                 pane_view_attach(n->view, webs[attached]);
-            }
         }
 
         return n;
     }
-
 
     const char *dir =
         cJSON_GetObjectItem(jnode, "dir")->valuestring;
@@ -206,6 +237,8 @@ static LayoutNode *load_node_cjson(
 LayoutNode *session_load(LayoutNode **focused)
 {
     const char *path = session_path();
+    if (!path) return NULL;
+
     FILE *f = fopen(path, "r");
     if (!f) return NULL;
 
@@ -220,51 +253,36 @@ LayoutNode *session_load(LayoutNode **focused)
 
     cJSON *root_json = cJSON_Parse(data);
     free(data);
-    if (!root_json) return NULL;
+
+    if (!session_validate_json(root_json)) {
+        if (root_json)
+            cJSON_Delete(root_json);
+        return NULL;
+    }
 
     int focus_id =
         cJSON_GetObjectItem(root_json, "focused")->valueint;
 
     cJSON *webviews =
         cJSON_GetObjectItem(root_json, "webviews");
-    if (!webviews || !cJSON_IsArray(webviews)) {
-        cJSON_Delete(root_json);
-        return NULL;
-    }
 
     int web_count = cJSON_GetArraySize(webviews);
     WebView **webs = calloc((size_t)web_count, sizeof(WebView *));
     for (int i = 0; i < web_count; i++) {
         cJSON *item = cJSON_GetArrayItem(webviews, i);
         cJSON *url = item ? cJSON_GetObjectItem(item, "url") : NULL;
-        const char *u = (url && cJSON_IsString(url)) ? url->valuestring : NULL;
-        if (!u || !*u)
-            u = "about:blank";
+        const char *u = (url && cJSON_IsString(url)) ? url->valuestring : "about:blank";
         webs[i] = (WebView *)web_view_create(u);
     }
 
     cJSON *tree =
         cJSON_GetObjectItem(root_json, "tree");
-    if (!tree) {
-        tab_manager_destroy_all();
-        free(webs);
-        cJSON_Delete(root_json);
-        return NULL;
-    }
 
     int max_id = 0;
     LayoutNode *root =
         load_node_cjson(tree, NULL, &max_id, webs, web_count);
 
-    if (!root) {
-        tab_manager_destroy_all();
-        free(webs);
-        cJSON_Delete(root_json);
-        return NULL;
-    }
-
     free(webs);
-
     layout_reset_leaf_ids(max_id + 1);
 
     if (focus_id >= 0)
@@ -272,4 +290,47 @@ LayoutNode *session_load(LayoutNode **focused)
 
     cJSON_Delete(root_json);
     return root;
+}
+
+
+static void session_save_safe(void)
+{
+    if (g_root)
+        session_save(g_root, g_focused);
+}
+
+static void session_signal_handler(int sig)
+{
+    (void)sig;
+    g_should_exit = 1;
+}
+
+void session_register(LayoutNode *root, LayoutNode *focused)
+{
+    g_root = root;
+    g_focused = focused;
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = session_signal_handler;
+
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+}
+
+
+void session_autosave_tick(void)
+{
+    static time_t last_save = 0;
+    time_t now = time(NULL);
+
+    if (g_should_exit) {
+        session_save_safe();
+        exit(0);
+    }
+
+    if (now - last_save >= g_autosave_interval_sec) {
+        session_save_safe();
+        last_save = now;
+    }
 }
