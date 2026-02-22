@@ -5,30 +5,75 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define MAX_TABS 128
-
-static WebViewEntry tabs[MAX_TABS];
-static int tab_count = 0;
+static TabManager g_tabs = {0};
 static SDL_Renderer *g_renderer = NULL;
 
 static SDL_Texture *cairo_to_texture(cairo_surface_t *s);
-/* ---------- helpers ---------- */
 
-WebViewEntry *tab_registry_get_by_view(View *v)
+static void ensure_capacity(int needed)
 {
-    for (int i = 0; i < tab_registry_count(); i++) {
-        WebViewEntry *e = tab_registry_get(i);
-        if (e && e->view == v)
-            return e;
-    }
-    return NULL;
+    if (g_tabs.capacity >= needed)
+        return;
+
+    int new_cap = g_tabs.capacity ? g_tabs.capacity * 2 : 8;
+    while (new_cap < needed)
+        new_cap *= 2;
+
+    g_tabs.all = realloc(g_tabs.all, sizeof(WebView *) * new_cap);
+    g_tabs.entries = realloc(g_tabs.entries, sizeof(TabEntry) * new_cap);
+    g_tabs.capacity = new_cap;
 }
-static WebViewEntry *find_entry(View *v)
+
+int tab_manager_index_of(WebView *web)
 {
-    for (int i = 0; i < tab_count; i++)
-        if (tabs[i].view == v)
-            return &tabs[i];
-    return NULL;
+    if (!web)
+        return -1;
+    for (int i = 0; i < g_tabs.count; i++) {
+        if (g_tabs.all[i] == web)
+            return i;
+    }
+    return -1;
+}
+
+WebView *tab_manager_webview_at(int index)
+{
+    if (index < 0 || index >= g_tabs.count)
+        return NULL;
+    return g_tabs.all[index];
+}
+
+TabEntry *tab_manager_entry_at(int index)
+{
+    if (index < 0 || index >= g_tabs.count)
+        return NULL;
+    return &g_tabs.entries[index];
+}
+
+int tab_manager_count(void)
+{
+    return g_tabs.count;
+}
+
+int tab_manager_selected(void)
+{
+    if (g_tabs.count <= 0)
+        return -1;
+    return g_tabs.selected_index;
+}
+
+void tab_manager_set_selected(int index)
+{
+    if (g_tabs.count <= 0) {
+        g_tabs.selected_index = -1;
+        return;
+    }
+
+    if (index < 0)
+        index = 0;
+    if (index >= g_tabs.count)
+        index = g_tabs.count - 1;
+
+    g_tabs.selected_index = index;
 }
 
 /* Cairo → SDL texture */
@@ -73,8 +118,6 @@ cairo_to_texture(cairo_surface_t *s)
 }
 
 /* ---------- favicon async ---------- */
-
-/* static – registry private */
 static void favicon_cb(
     GObject      *source_object,
     GAsyncResult *res,
@@ -84,13 +127,15 @@ static void favicon_cb(
     WebKitFaviconDatabase *db =
         WEBKIT_FAVICON_DATABASE(source_object);
 
-    WebViewEntry *e = user_data;
-    SDL_Log("[favicon_cb] entered");
-
-    if (!e || !e->alive) {
-        SDL_Log("[favicon_cb] entry dead");
+    WebView *web = user_data;
+    int idx = tab_manager_index_of(web);
+    if (idx < 0) {
+        SDL_Log("[favicon_cb] entry missing");
         return;
     }
+
+    TabEntry *e = &g_tabs.entries[idx];
+    SDL_Log("[favicon_cb] entered");
 
     GError *error = NULL;
 
@@ -104,11 +149,13 @@ static void favicon_cb(
     if (error) {
         SDL_Log("[favicon_cb] error: %s", error->message);
         g_error_free(error);
+        e->favicon_requested = 0;
         return;
     }
 
     if (!surface) {
         SDL_Log("[favicon_cb] surface NULL");
+        e->favicon_requested = 0;
         return;
     }
 
@@ -123,117 +170,154 @@ static void favicon_cb(
         SDL_DestroyTexture(e->icon);
 
     e->icon = cairo_to_texture(surface);
+    e->favicon_requested = 0;
 
     SDL_Log("[favicon_cb] texture=%p", e->icon);
 
     cairo_surface_destroy(surface);
 }
 
-/* PUBLIC API */
-void tab_registry_request_snapshot(View *web)
+void tab_manager_request_favicon(WebView *web)
 {
-    WebViewEntry *e = find_entry(web);
-    if (!e) {
+    int idx = tab_manager_index_of(web);
+    if (idx < 0) {
         SDL_Log("[favicon] no entry");
         return;
     }
 
+    TabEntry *e = &g_tabs.entries[idx];
     if (e->icon) {
         SDL_Log("[favicon] already have icon");
         return;
     }
 
-    WebView *wv = (WebView *)web;
-    const char *uri = webkit_web_view_get_uri(wv->wk);
+    if (e->favicon_requested) {
+        SDL_Log("[favicon] request already pending");
+        return;
+    }
 
+    const char *uri = webkit_web_view_get_uri(web->wk);
     SDL_Log("[favicon] request for %s", uri ? uri : "(null)");
 
     if (!uri)
         return;
 
     WebKitWebContext *ctx =
-        webkit_web_view_get_context(wv->wk);
+        webkit_web_view_get_context(web->wk);
 
     WebKitFaviconDatabase *db =
         webkit_web_context_get_favicon_database(ctx);
+
+    e->favicon_requested = 1;
 
     webkit_favicon_database_get_favicon(
         db,
         uri,
         NULL,
-        favicon_cb,   // ✅ CORRECT CALLBACK
-        e
+        favicon_cb,
+        web
     );
 }
 
 /* ---------- public API ---------- */
-
-void tab_registry_init(SDL_Renderer *renderer)
+void tab_manager_init(SDL_Renderer *renderer)
 {
-
-    memset(tabs, 0, sizeof(tabs));
-    tab_count = 0;
+    memset(&g_tabs, 0, sizeof(g_tabs));
     g_renderer = renderer;
-
+    g_tabs.selected_index = -1;
 }
 
-int tab_registry_add(View *web)
+int tab_manager_add(WebView *web, const char *url)
 {
-    if (tab_count >= MAX_TABS)
+    if (!web)
         return -1;
 
-    WebViewEntry *e = &tabs[tab_count];
+    ensure_capacity(g_tabs.count + 1);
+    g_tabs.all[g_tabs.count] = web;
+
+    TabEntry *e = &g_tabs.entries[g_tabs.count];
     memset(e, 0, sizeof(*e));
+    if (url)
+        strncpy(e->url, url, sizeof(e->url) - 1);
+    e->loading = 1;
 
-    e->view = web;
-    e->alive = 1;
+    g_tabs.count++;
+    if (g_tabs.selected_index < 0)
+        g_tabs.selected_index = 0;
 
-    tab_count++;
-    return tab_count - 1;
+    return g_tabs.count - 1;
 }
 
-void tab_registry_remove(View *web)
+void tab_manager_remove(WebView *web)
 {
-    for (int i = 0; i < tab_count; i++) {
-        if (tabs[i].view == web) {
+    int idx = tab_manager_index_of(web);
+    if (idx < 0)
+        return;
 
-            if (tabs[i].icon)
-                SDL_DestroyTexture(tabs[i].icon);
+    TabEntry *e = &g_tabs.entries[idx];
+    if (e->icon)
+        SDL_DestroyTexture(e->icon);
 
-            memmove(&tabs[i], &tabs[i + 1],
-                    sizeof(WebViewEntry) * (tab_count - i - 1));
-            tab_count--;
-            return;
-        }
+    int tail = g_tabs.count - 1;
+    if (idx < tail) {
+        memmove(&g_tabs.all[idx],
+                &g_tabs.all[idx + 1],
+                sizeof(WebView *) * (tail - idx));
+        memmove(&g_tabs.entries[idx],
+                &g_tabs.entries[idx + 1],
+                sizeof(TabEntry) * (tail - idx));
+    }
+
+    g_tabs.count--;
+
+    if (g_tabs.count == 0) {
+        g_tabs.selected_index = -1;
+    } else if (g_tabs.selected_index > idx) {
+        g_tabs.selected_index--;
+    } else if (g_tabs.selected_index == idx &&
+               g_tabs.selected_index >= g_tabs.count) {
+        g_tabs.selected_index = g_tabs.count - 1;
     }
 }
 
-int tab_registry_count(void)
+void tab_manager_destroy_all(void)
 {
-    return tab_count;
+    while (g_tabs.count > 0) {
+        WebView *web = g_tabs.all[0];
+        web_view_close((View *)web);
+    }
+
+    free(g_tabs.all);
+    free(g_tabs.entries);
+    memset(&g_tabs, 0, sizeof(g_tabs));
+    g_tabs.selected_index = -1;
 }
 
-WebViewEntry *tab_registry_get(int index)
+void tab_manager_set_title(WebView *web, const char *title)
 {
-    if (index < 0 || index >= tab_count)
-        return NULL;
-    return &tabs[index];
-}
-
-void tab_registry_set_title(View *web, const char *title)
-{
-    WebViewEntry *e = find_entry(web);
-    if (!e || !title)
+    int idx = tab_manager_index_of(web);
+    if (idx < 0 || !title)
         return;
 
+    TabEntry *e = &g_tabs.entries[idx];
     strncpy(e->title, title, sizeof(e->title) - 1);
 }
 
-void tab_registry_set_loading(View *web, int loading)
+void tab_manager_set_url(WebView *web, const char *url)
 {
-    WebViewEntry *e = find_entry(web);
-    if (!e)
+    int idx = tab_manager_index_of(web);
+    if (idx < 0 || !url)
         return;
 
-    e->loading = loading;
+    TabEntry *e = &g_tabs.entries[idx];
+    strncpy(e->url, url, sizeof(e->url) - 1);
+}
+
+void tab_manager_set_loading(WebView *web, int loading)
+{
+    int idx = tab_manager_index_of(web);
+    if (idx < 0)
+        return;
+
+    g_tabs.entries[idx].loading = loading;
 }

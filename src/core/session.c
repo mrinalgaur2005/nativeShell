@@ -1,6 +1,9 @@
 #include "session.h"
 #include "layout/layout.h"
+#include "view/pane/pane_view.h"
+#include "view/tab/tab_view.h"
 #include "view/web/web_view.h"
+#include "view/web/webview_registry.h"
 
 #include <cjson/cJSON.h>
 #include <SDL2/SDL_log.h>
@@ -53,13 +56,18 @@ static void save_node_json(FILE *f, LayoutNode *n, int indent)
         fputs("\"view\": {\n", f);
 
         for (int i = 0; i < indent + 2; i++) fputs("  ", f);
-        if (n->view->type == VIEW_WEB) {
-            fprintf(f, "\"type\": \"web\",\n");
-            for (int i = 0; i < indent + 2; i++) fputs("  ", f);
-            fprintf(f, "\"url\": \"%s\"\n",
-                    web_view_get_url(n->view));
+        if (n->view && n->view->type == VIEW_TAB) {
+            fprintf(f, "\"type\": \"tab\"\n");
         } else {
-            fprintf(f, "\"type\": \"placeholder\"\n");
+            fprintf(f, "\"type\": \"pane\",\n");
+            int attached = -1;
+            if (n->view && n->view->type == VIEW_PANE) {
+                WebView *web = pane_view_get_attached(n->view);
+                if (web)
+                    attached = tab_manager_index_of(web);
+            }
+            for (int i = 0; i < indent + 2; i++) fputs("  ", f);
+            fprintf(f, "\"attached\": %d\n", attached);
         }
 
         for (int i = 0; i < indent + 1; i++) fputs("  ", f);
@@ -102,6 +110,24 @@ void session_save(LayoutNode *root, LayoutNode *focused)
     fprintf(f, "  \"focused\": %d,\n",
             focused ? focused->id : -1);
 
+    fputs("  \"webviews\": [\n", f);
+    for (int i = 0; i < tab_manager_count(); i++) {
+        WebView *web = tab_manager_webview_at(i);
+        TabEntry *e = tab_manager_entry_at(i);
+        const char *url = NULL;
+        if (e && e->url[0])
+            url = e->url;
+        if (!url)
+            url = web_view_get_url((View *)web);
+        if (!url)
+            url = "";
+
+        fprintf(f, "    { \"url\": \"%s\" }%s\n",
+                url,
+                (i == tab_manager_count() - 1) ? "" : ",");
+    }
+    fputs("  ],\n", f);
+
     fputs("  \"tree\": ", f);
     save_node_json(f, root, 1);
     fputs("\n}\n", f);
@@ -113,7 +139,9 @@ void session_save(LayoutNode *root, LayoutNode *focused)
 static LayoutNode *load_node_cjson(
     cJSON *jnode,
     LayoutNode *parent,
-    int *max_id)
+    int *max_id,
+    WebView **webs,
+    int web_count)
 {
     const char *type =
         cJSON_GetObjectItem(jnode, "type")->valuestring;
@@ -131,15 +159,24 @@ static LayoutNode *load_node_cjson(
             *max_id = saved_id;
 
         cJSON *view = cJSON_GetObjectItem(jnode, "view");
-        const char *vtype =
-            cJSON_GetObjectItem(view, "type")->valuestring;
+        const char *vtype = NULL;
+        if (view)
+            vtype = cJSON_GetObjectItem(view, "type")->valuestring;
 
-        if (strcmp(vtype, "web") == 0) {
-            const char *url =
-                cJSON_GetObjectItem(view, "url")->valuestring;
-
-            n->view->destroy(n->view);
-            n->view = web_view_create(url);
+        if (vtype && strcmp(vtype, "tab") == 0) {
+            if (n->view)
+                n->view->destroy(n->view);
+            n->view = tab_view_create();
+        } else {
+            int attached = -1;
+            if (view) {
+                cJSON *att = cJSON_GetObjectItem(view, "attached");
+                if (att)
+                    attached = att->valueint;
+            }
+            if (attached >= 0 && attached < web_count) {
+                pane_view_attach(n->view, webs[attached]);
+            }
         }
 
         return n;
@@ -159,9 +196,9 @@ static LayoutNode *load_node_cjson(
     n->parent = parent;
 
     n->a = load_node_cjson(
-        cJSON_GetObjectItem(jnode, "a"), n, max_id);
+        cJSON_GetObjectItem(jnode, "a"), n, max_id, webs, web_count);
     n->b = load_node_cjson(
-        cJSON_GetObjectItem(jnode, "b"), n, max_id);
+        cJSON_GetObjectItem(jnode, "b"), n, max_id, webs, web_count);
 
     return n;
 }
@@ -188,12 +225,45 @@ LayoutNode *session_load(LayoutNode **focused)
     int focus_id =
         cJSON_GetObjectItem(root_json, "focused")->valueint;
 
+    cJSON *webviews =
+        cJSON_GetObjectItem(root_json, "webviews");
+    if (!webviews || !cJSON_IsArray(webviews)) {
+        cJSON_Delete(root_json);
+        return NULL;
+    }
+
+    int web_count = cJSON_GetArraySize(webviews);
+    WebView **webs = calloc((size_t)web_count, sizeof(WebView *));
+    for (int i = 0; i < web_count; i++) {
+        cJSON *item = cJSON_GetArrayItem(webviews, i);
+        cJSON *url = item ? cJSON_GetObjectItem(item, "url") : NULL;
+        const char *u = (url && cJSON_IsString(url)) ? url->valuestring : NULL;
+        if (!u || !*u)
+            u = "about:blank";
+        webs[i] = (WebView *)web_view_create(u);
+    }
+
     cJSON *tree =
         cJSON_GetObjectItem(root_json, "tree");
+    if (!tree) {
+        tab_manager_destroy_all();
+        free(webs);
+        cJSON_Delete(root_json);
+        return NULL;
+    }
 
     int max_id = 0;
     LayoutNode *root =
-        load_node_cjson(tree, NULL, &max_id);
+        load_node_cjson(tree, NULL, &max_id, webs, web_count);
+
+    if (!root) {
+        tab_manager_destroy_all();
+        free(webs);
+        cJSON_Delete(root_json);
+        return NULL;
+    }
+
+    free(webs);
 
     layout_reset_leaf_ids(max_id + 1);
 

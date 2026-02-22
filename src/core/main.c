@@ -18,7 +18,7 @@
 #include "layout/layout.h"
 #include "render/render.h"
 #include "core/session.h"
-#include "view/placeholder/placeholder_view.h"
+#include "view/pane/pane_view.h"
 #include "view/tab/tab_view.h"
 #include "view/view.h"
 #include "view/web/web_view.h"
@@ -63,13 +63,92 @@ InputMode input_mode = INPUT_MODE_WM;
 static bool is_text_key(SDL_Keycode sym);
 bool v_down = false;
 
-void cmd_open_webview(LayoutNode *leaf,const char *url){
-    if(!leaf || !leaf->view) return;
-    if(leaf->view->type == VIEW_WEB) return;
-    leaf->view->destroy(leaf->view);
-    leaf->view=web_view_create(url);
-    input_mode=INPUT_MODE_VIEW;
+static LayoutNode *pick_target_pane(LayoutNode *focused,
+                                    LayoutNode *last_pane,
+                                    LayoutNode *root)
+{
+    if (focused && focused->view && focused->view->type == VIEW_PANE)
+        return focused;
+    if (last_pane && last_pane->view && last_pane->view->type == VIEW_PANE)
+        return last_pane;
+    return layout_find_view_type(root, VIEW_PANE);
+}
 
+static WebView *pane_attached(LayoutNode *pane)
+{
+    if (!pane || !pane->view || pane->view->type != VIEW_PANE)
+        return NULL;
+    return pane_view_get_attached(pane->view);
+}
+
+static void detach_webview_from_pane(LayoutNode *pane)
+{
+    if (!pane || !pane->view || pane->view->type != VIEW_PANE)
+        return;
+    pane_view_detach(pane->view);
+}
+
+static void attach_webview_to_pane(LayoutNode *root,
+                                   LayoutNode *pane,
+                                   WebView *web)
+{
+    if (!root || !pane || !pane->view || pane->view->type != VIEW_PANE || !web)
+        return;
+
+    LayoutNode *existing = layout_find_pane_by_webview(root, web);
+    if (existing && existing != pane &&
+        existing->view && existing->view->type == VIEW_PANE)
+    {
+        pane_view_detach(existing->view);
+    }
+
+    if (pane_view_get_attached(pane->view))
+        pane_view_detach(pane->view);
+
+    pane_view_attach(pane->view, web);
+}
+
+static void hide_webview_from_pane(LayoutNode **root,
+                                   LayoutNode **focused,
+                                   LayoutNode **last_pane)
+{
+    if (!root || !*root || !focused || !*focused)
+        return;
+
+    LayoutNode *pane = *focused;
+    if (!pane->view || pane->view->type != VIEW_PANE)
+        return;
+
+    detach_webview_from_pane(pane);
+
+    if (pane->parent) {
+        LayoutNode *new_focus = layout_close_leaf(pane, root);
+        *focused = layout_leaf_from_node(new_focus);
+        if (!*focused)
+            *focused = layout_first_leaf(*root);
+    }
+
+    if (*focused && (*focused)->view &&
+        (*focused)->view->type == VIEW_PANE)
+    {
+        *last_pane = *focused;
+    } else {
+        *last_pane = layout_find_view_type(*root, VIEW_PANE);
+    }
+}
+
+static void cmd_open_webview(LayoutNode *pane,
+                             LayoutNode *root,
+                             const char *url)
+{
+    if (!pane || !pane->view || pane->view->type != VIEW_PANE)
+        return;
+    if (pane_view_get_attached(pane->view))
+        return;
+
+    WebView *web = (WebView *)web_view_create(url);
+    attach_webview_to_pane(root, pane, web);
+    input_mode = INPUT_MODE_VIEW;
 }
 
 
@@ -87,6 +166,7 @@ int main(void) {
         SDL_Log("TTF init failed: %s", TTF_GetError());
     }
     cmd_overlay_init();
+    pane_view_init();
     tab_view_init();
     config_load();
     SDL_Cursor *cursor_we = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
@@ -104,10 +184,11 @@ int main(void) {
             win, -1,
             SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
             );
-    tab_registry_init(ren);
+    tab_manager_init(ren);
 
     LayoutNode *focused = NULL;
     LayoutNode *root = NULL;
+    LayoutNode *last_pane = NULL;
 
     if (config_restore_session())
         root = session_load(&focused);
@@ -115,11 +196,17 @@ int main(void) {
     if (!root) {
         root = layout_leaf();
         const char *url = config_startup_url();
-        if (url)
-            root->view = web_view_create(url);
-        else root->view = web_view_create("https://www.youtube.com");
+        if (!url)
+            url = "https://www.youtube.com";
+        WebView *web = (WebView *)web_view_create(url);
+        attach_webview_to_pane(root, root, web);
         focused = root;
     }
+
+    if (focused && focused->view && focused->view->type == VIEW_PANE)
+        last_pane = focused;
+    else
+        last_pane = layout_find_view_type(root, VIEW_PANE);
     bool running = true;
     SDL_Event e;
 
@@ -192,17 +279,21 @@ int main(void) {
                     focused = hit;
 
                     if (focused->view &&
-                            focused->view->type == VIEW_WEB)
+                        focused->view->type == VIEW_PANE)
                     {
-                        WebView *wv = (WebView *)focused->view;
-                        gtk_widget_grab_focus(GTK_WIDGET(wv->wk));
-                        input_mode=INPUT_MODE_VIEW;
+                        last_pane = focused;
+                        WebView *wv = pane_attached(focused);
+                        if (wv) {
+                            gtk_widget_grab_focus(GTK_WIDGET(wv->wk));
+                            input_mode = INPUT_MODE_VIEW;
+                        }
                     }
                 }
             }
 
             /* ---------- Mode switching ---------- */
-            if (e.type == SDL_KEYDOWN && !e.key.repeat && focused->view->type != VIEW_TAB) {
+            if (e.type == SDL_KEYDOWN && !e.key.repeat &&
+                focused && focused->view && focused->view->type != VIEW_TAB) {
 
                 if (e.key.keysym.sym == SDLK_ESCAPE) {
                     input_mode = INPUT_MODE_WM;
@@ -212,7 +303,8 @@ int main(void) {
                 if (e.key.keysym.sym == SDLK_i &&
                         input_mode == INPUT_MODE_WM &&
                         focused && focused->view &&
-                        focused->view->type == VIEW_WEB)
+                        focused->view->type == VIEW_PANE &&
+                        pane_attached(focused))
                 {
                     input_mode = INPUT_MODE_VIEW;
                     continue;
@@ -233,29 +325,35 @@ int main(void) {
             /* ---------- VIEW MODE: forward everything ---------- */
             if (input_mode == INPUT_MODE_VIEW &&
                     focused && focused->view &&
-                    focused->view->type == VIEW_WEB)
+                    focused->view->type == VIEW_PANE)
             {
+                WebView *wv = pane_attached(focused);
+                if (!wv) {
+                    input_mode = INPUT_MODE_WM;
+                    continue;
+                }
+
                 switch (e.type) {
 
                     case SDL_KEYDOWN:
                     case SDL_KEYUP:
-                        web_view_handle_key(focused->view, &e.key);
+                        web_view_handle_key((View *)wv, &e.key);
                         break;
 
                     case SDL_MOUSEBUTTONDOWN:
                     case SDL_MOUSEBUTTONUP:
                         web_view_handle_mouse(
-                                focused->view, &e.button, focused->rect);
+                                (View *)wv, &e.button, focused->rect);
                         break;
 
                     case SDL_MOUSEMOTION:
                         web_view_handle_motion(
-                                focused->view, &e.motion, focused->rect);
+                                (View *)wv, &e.motion, focused->rect);
                         break;
 
                     case SDL_MOUSEWHEEL:
                         web_view_handle_wheel(
-                                focused->view, &e.wheel, focused->rect);
+                                (View *)wv, &e.wheel, focused->rect);
                         break;
                 }
                 continue; /* IMPORTANT */
@@ -270,10 +368,23 @@ int main(void) {
                 }
 
                 if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_RETURN) {
-                    if (cmd_execute(&root, &focused))
-                        input_mode = INPUT_MODE_VIEW;
-                    else
+                    if (cmd_execute(&root, &focused)) {
+                        if (focused && focused->view &&
+                            focused->view->type == VIEW_PANE &&
+                            pane_attached(focused))
+                        {
+                            input_mode = INPUT_MODE_VIEW;
+                        } else {
+                            input_mode = INPUT_MODE_WM;
+                        }
+                        if (focused && focused->view &&
+                            focused->view->type == VIEW_PANE)
+                        {
+                            last_pane = focused;
+                        }
+                    } else {
                         input_mode = INPUT_MODE_WM;
+                    }
 
                     cmd_exit();
                     continue;
@@ -297,6 +408,14 @@ int main(void) {
                     e.type == SDL_KEYDOWN &&
                     e.key.repeat == 0)
             {
+                if (e.key.keysym.sym == SDLK_h &&
+                    (e.key.keysym.mod & KMOD_SHIFT))
+                {
+                    hide_webview_from_pane(&root, &focused, &last_pane);
+                    input_mode = INPUT_MODE_WM;
+                    continue;
+                }
+
                 if (focused &&
                         focused->view &&
                         focused->view->type == VIEW_TAB)
@@ -312,6 +431,8 @@ int main(void) {
 
                                            View *tab_view = tab_leaf->view;
                                            tab_leaf->view = NULL;
+                                           if (tab_view)
+                                               tab_view->destroy(tab_view);
 
                                            LayoutNode *new_focus = layout_close_leaf(tab_leaf, &root);
                                            focused = layout_leaf_from_node(new_focus);
@@ -319,44 +440,27 @@ int main(void) {
                                                focused = layout_first_leaf(root);
 
                                            input_mode = INPUT_MODE_WM;
+                                           if (focused && focused->view &&
+                                               focused->view->type == VIEW_PANE)
+                                           {
+                                               last_pane = focused;
+                                           }
                                            continue;
                                        }
 
                         case TAB_ATTACH: {
-                                             WebViewEntry *entry =
-                                                 tab_registry_get(tab_view_selected(focused->view));
-
-                                             if (!entry || !entry->alive)
+                                             WebView *web =
+                                                 tab_manager_webview_at(
+                                                     tab_view_selected(focused->view));
+                                             if (!web)
                                                  break;
 
-                                             LayoutNode *existing =
-                                                 layout_find_view(root, entry->view);
-
-                                             if (existing) {
-                                                 focused = existing;
-                                                 input_mode = INPUT_MODE_VIEW;
-                                                 break;
+                                             LayoutNode *target =
+                                                 pick_target_pane(focused, last_pane, root);
+                                             if (target) {
+                                                 attach_webview_to_pane(root, target, web);
+                                                 last_pane = target;
                                              }
-
-
-                                             LayoutNode *tab_leaf = focused;
-                                             LayoutNode *content_leaf =
-                                                 layout_close_leaf(tab_leaf, &root);
-
-                                             if (!content_leaf || content_leaf->type != NODE_LEAF)
-                                                 break;
-
-                                             LayoutNode *new_leaf =
-                                                 layout_split_leaf(
-                                                         content_leaf,
-                                                         SPLIT_VERTICAL,
-                                                         0.5f,
-                                                         &root
-                                                         );
-
-                                             new_leaf->view = entry->view;
-                                             focused = new_leaf;
-                                             input_mode = INPUT_MODE_VIEW;
                                              break;
                                          }
 
@@ -373,28 +477,31 @@ int main(void) {
                 Action action = config_action_for_key(e.key.keysym.sym);
 
                 if (focused && focused->view &&
-                        focused->view->type == VIEW_WEB)
+                        focused->view->type == VIEW_PANE)
                 {
-                    if (action == ACTION_WEB_BACK) {
-                        web_view_undo(focused->view);
-                        continue;
-                    }
+                    WebView *wv = pane_attached(focused);
+                    if (wv) {
+                        if (action == ACTION_WEB_BACK) {
+                            web_view_undo((View *)wv);
+                            continue;
+                        }
 
-                    if (action == ACTION_WEB_RELOAD &&
-                            !(e.key.keysym.mod & KMOD_CTRL)) {
-                        web_view_reload(focused->view);
-                        continue;
-                    }
+                        if (action == ACTION_WEB_RELOAD &&
+                                !(e.key.keysym.mod & KMOD_CTRL)) {
+                            web_view_reload((View *)wv);
+                            continue;
+                        }
 
-                    if (action == ACTION_WEB_RELOAD &&
-                            (e.key.keysym.mod & KMOD_CTRL)) {
-                        web_view_redo(focused->view);
-                        continue;
-                    }
+                        if (action == ACTION_WEB_RELOAD &&
+                                (e.key.keysym.mod & KMOD_CTRL)) {
+                            web_view_redo((View *)wv);
+                            continue;
+                        }
 
-                    if (action == ACTION_WEB_STOP) {
-                        web_view_stop(focused->view);
-                        continue;
+                        if (action == ACTION_WEB_STOP) {
+                            web_view_stop((View *)wv);
+                            continue;
+                        }
                     }
                 }
 
@@ -417,39 +524,96 @@ int main(void) {
                     case ACTION_SPLIT_VERTICAL:
                         focused = layout_split_leaf(
                                 focused, SPLIT_VERTICAL, 0.5f, &root);
+                        if (focused && focused->view &&
+                            focused->view->type == VIEW_PANE)
+                        {
+                            last_pane = focused;
+                        }
                         break;
 
                     case ACTION_SPLIT_HORIZONTAL:
                         focused = layout_split_leaf(
                                 focused, SPLIT_HORIZONTAL, 0.5f, &root);
+                        if (focused && focused->view &&
+                            focused->view->type == VIEW_PANE)
+                        {
+                            last_pane = focused;
+                        }
                         break;
 
                     case ACTION_CLOSE_PANE:
                         SDL_Log("just merged panes");
+                        if (focused && focused->view) {
+                            if (focused->view->type == VIEW_PANE) {
+                                detach_webview_from_pane(focused);
+                            } else {
+                                focused->view->destroy(focused->view);
+                                focused->view = NULL;
+                            }
+                        }
+
                         LayoutNode *new_focus = layout_close_leaf(focused, &root);
                         focused = layout_leaf_from_node(new_focus);
                         if (!focused)
                             focused = layout_first_leaf(root);
+                        if (focused && focused->view &&
+                            focused->view->type == VIEW_PANE)
+                        {
+                            last_pane = focused;
+                        } else {
+                            last_pane = layout_find_view_type(root, VIEW_PANE);
+                        }
+                        break;
+
+                    case ACTION_HIDE_WEBVIEW:
+                        hide_webview_from_pane(&root, &focused, &last_pane);
+                        input_mode = INPUT_MODE_WM;
                         break;
 
                     case ACTION_FOCUS_LEFT:
                         focused = focus_move(root, focused, DIR_LEFT);
+                        if (focused && focused->view &&
+                            focused->view->type == VIEW_PANE)
+                        {
+                            last_pane = focused;
+                        }
                         break;
 
                     case ACTION_FOCUS_RIGHT:
                         focused = focus_move(root, focused, DIR_RIGHT);
+                        if (focused && focused->view &&
+                            focused->view->type == VIEW_PANE)
+                        {
+                            last_pane = focused;
+                        }
                         break;
 
                     case ACTION_FOCUS_UP:
                         focused = focus_move(root, focused, DIR_UP);
+                        if (focused && focused->view &&
+                            focused->view->type == VIEW_PANE)
+                        {
+                            last_pane = focused;
+                        }
                         break;
 
                     case ACTION_FOCUS_DOWN:
                         focused = focus_move(root, focused, DIR_DOWN);
+                        if (focused && focused->view &&
+                            focused->view->type == VIEW_PANE)
+                        {
+                            last_pane = focused;
+                        }
                         break;
 
                     case ACTION_OPEN_WEBVIEW:
-                        cmd_open_webview(focused,url);
+                        {
+                            LayoutNode *target =
+                                pick_target_pane(focused, last_pane, root);
+                            cmd_open_webview(target, root, url);
+                            if (target)
+                                last_pane = target;
+                        }
                         break;
 
                     case ACTION_ENTER_CMD:
@@ -491,6 +655,7 @@ int main(void) {
         SDL_RenderPresent(ren);
     }
     session_save(root,focused);
+    tab_manager_destroy_all();
     layout_destroy(root);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

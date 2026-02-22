@@ -2,11 +2,11 @@
 #include "view/tab/tab_view.h"
 #include "view/view.h"
 #include "view/web/web_view.h"
-#define RESIZE_STEP 0.05f
+#define RESIZE_STEP 0.02f
 #define RESIZE_ANIM_SPEED 0.2f
 #include "layout/layout.h"
 #include "view/debug/debug_view.h"
-#include "view/placeholder/placeholder_view.h"
+#include "view/pane/pane_view.h"
 #include <SDL2/SDL_log.h>
 #include <SDL2/SDL_pixels.h>
 #include <stdio.h>
@@ -29,9 +29,9 @@ void layout_detach_view(LayoutNode *n, View *v)
     if (!n) return;
 
     if (n->type == NODE_LEAF && n->view == v) {
-        n->view = placeholder_view_create(
-            (SDL_Color){80, 80, 80, 255}
-        );
+        if (n->view)
+            n->view->destroy(n->view);
+        n->view = pane_view_create();
         return;
     }
 
@@ -62,7 +62,7 @@ LayoutNode *layout_leaf(void){
     n->id = next_leaf_id++;
     n->ratio = 0.5f;
     n->target_ratio = 0.5f;
-    n->view = placeholder_view_create((SDL_Color){80,80,80,255});
+    n->view = pane_view_create();
     return n;
 }
 
@@ -216,7 +216,7 @@ void layout_destroy(LayoutNode *node) {
     if (!node) return;
     layout_destroy(node->a);
     layout_destroy(node->b);
-    if (node->view && node->view->type != VIEW_WEB)
+    if (node->view)
         node->view->destroy(node->view);
     free(node);
 }
@@ -305,12 +305,9 @@ void layout_resize_relative(
 
         if (!split) return;
 
-        /* Ctrl+h or Ctrl+l */
-        if (dir == DIR_LEFT) {
-            delta = is_a ? -delta : +delta;
-        } else { /* DIR_RIGHT */
-            delta = is_a ? +delta : -delta;
-        }
+        /* Ctrl+h or Ctrl+l: move divider directionally */
+        delta = (dir == DIR_LEFT) ? -RESIZE_STEP : RESIZE_STEP;
+        (void)is_a;
     }
 
     if (dir == DIR_UP || dir == DIR_DOWN) {
@@ -322,12 +319,9 @@ void layout_resize_relative(
 
         if (!split) return;
 
-        /* Ctrl+k or Ctrl+j */
-        if (dir == DIR_UP) {
-            delta = is_a ? -delta : +delta;
-        } else { /* DIR_DOWN */
-            delta = is_a ? +delta : -delta;
-        }
+        /* Ctrl+k or Ctrl+j: move divider directionally */
+        delta = (dir == DIR_UP) ? -RESIZE_STEP : RESIZE_STEP;
+        (void)is_a;
     }
 
     split->target_ratio =
@@ -358,10 +352,9 @@ static void detach_cb(LayoutNode *leaf, void *ud)
         return;
 
     if (leaf->view == target) {
-        /* replace with placeholder */
-        leaf->view = placeholder_view_create(
-            (SDL_Color){80, 80, 80, 255}
-        );
+        if (leaf->view)
+            leaf->view->destroy(leaf->view);
+        leaf->view = pane_view_create();
     }
 }
 
@@ -370,11 +363,9 @@ void layout_detach_view_everywhere(LayoutNode *n, View *v)
     if (!n) return;
 
     if (n->type == NODE_LEAF && n->view == v) {
-        /* destroy old non-web view if any */
-        if (n->view && n->view->type != VIEW_WEB)
+        if (n->view)
             n->view->destroy(n->view);
-
-        n->view = placeholder_view_create((SDL_Color){80,80,80,255});
+        n->view = pane_view_create();
         return;
     }
 
@@ -392,6 +383,24 @@ LayoutNode *layout_find_view(LayoutNode *n,View *v)
     if (r) return r;
 
     return layout_find_view(n->b, v);
+}
+
+LayoutNode *layout_find_pane_by_webview(LayoutNode *n, WebView *web)
+{
+    if (!n || !web)
+        return NULL;
+
+    if (n->type == NODE_LEAF &&
+        n->view &&
+        n->view->type == VIEW_PANE &&
+        pane_view_get_attached(n->view) == web)
+    {
+        return n;
+    }
+
+    LayoutNode *hit = layout_find_pane_by_webview(n->a, web);
+    if (hit) return hit;
+    return layout_find_pane_by_webview(n->b, web);
 }
 LayoutNode *layout_leaf_from_node(LayoutNode *n)
 {
@@ -448,6 +457,8 @@ LayoutNode *layout_insert_tabview(LayoutNode **root, int window_width)
     split->ratio = ratio;
     split->target_ratio = ratio;
 
+    if (tab_leaf->view)
+        tab_leaf->view->destroy(tab_leaf->view);
     tab_leaf->view = tab_view_create();
 
     return tab_leaf;

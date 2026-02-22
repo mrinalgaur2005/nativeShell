@@ -43,20 +43,22 @@ on_load_changed(WebKitWebView *wk,
     switch (event) {
 
         case WEBKIT_LOAD_STARTED:
-            tab_registry_set_loading((View *)wv, 1);
+            tab_manager_set_loading(wv, 1);
             break;
 
 
         case WEBKIT_LOAD_FINISHED:
             {
-                tab_registry_set_loading((View *)wv, 0);
+                tab_manager_set_loading(wv, 0);
 
                 const char *title = webkit_web_view_get_title(wk);
                 if (title)
-                    tab_registry_set_title((View *)wv, title);
+                    tab_manager_set_title(wv, title);
 
                 /* ask registry to handle visuals */
-                tab_registry_request_snapshot((View *)wv);
+                const char *uri = webkit_web_view_get_uri(wk);
+                SDL_Log("[favicon] load finished uri=%s", uri ? uri : "(null)");
+                tab_manager_request_favicon(wv);
                 break;
             }
 
@@ -75,8 +77,6 @@ static void draw(View *v,
     (void)focused;
 
     web_view_ensure_surface(wv, rect.w, rect.h);
-    WebKitWebContext *ctx = webkit_web_context_get_default();
-    webkit_web_context_set_favicon_database_directory(ctx, NULL);
 
     gtk_widget_set_size_request(wv->offscreen, rect.w, rect.h);
 
@@ -166,7 +166,7 @@ static void destroy(View *v)
 
     if (wv->wk)
         g_object_unref(wv->wk);
-    tab_registry_remove(v);
+    tab_manager_remove(wv);
     webkit_web_view_stop_loading(wv->wk);
     gtk_widget_destroy(GTK_WIDGET(wv->wk));
     free(wv);
@@ -192,13 +192,7 @@ View *web_view_create(const char *url)
     gtk_widget_show_all(wv->offscreen);
 
     /* ---- registry AFTER wk exists ---- */
-    int idx = tab_registry_add((View *)wv);
-    if (idx >= 0) {
-        WebViewEntry *e = tab_registry_get(idx);
-        strncpy(e->url, url, sizeof(e->url) - 1);
-        e->loading = 1;
-        e->title[0] = '\0';   /* important */
-    }
+    tab_manager_add(wv, url);
     /* ---- NOW connect signals ---- */
     g_signal_connect(
             wv->wk,
@@ -250,6 +244,7 @@ void web_view_load_url(View *v, const char *url)
         free(wv->url);
 
     wv->url = strdup(url);
+    tab_manager_set_url(wv, url);
     webkit_web_view_load_uri(wv->wk, url);
 }
 
@@ -487,7 +482,7 @@ void web_view_close(View *v)
     WebView *wv = (WebView *)v;
     if (!wv) return;
 
-    tab_registry_remove(v);
+    tab_manager_remove(wv);
 
     webkit_web_view_stop_loading(wv->wk);
 

@@ -5,6 +5,7 @@
 
 #include "command/command.h"
 #include "layout/layout.h"
+#include "view/pane/pane_view.h"
 #include "view/web/web_view.h"
 #include <SDL2/SDL_keyboard.h>
 #include <SDL2/SDL_log.h>
@@ -17,6 +18,8 @@ static bool active = false;
 
 static void url_encode(const char *in, char *out, size_t out_sz);
 static int is_probable_url(const char *s);
+static LayoutNode *find_other_leaf(LayoutNode *root, LayoutNode *focused);
+static void close_other_leaves(LayoutNode **root, LayoutNode **focused);
 static int is_probable_url(const char *s)
 {
     return
@@ -33,6 +36,57 @@ static void url_encode(const char *in, char *out, size_t out_sz)
             out[j++] = in[i];
     }
     out[j] = '\0';
+}
+
+static void find_other_cb(LayoutNode *node, void *userdata)
+{
+    struct {
+        LayoutNode *focused;
+        LayoutNode *hit;
+    } *ctx = userdata;
+
+    if (!ctx->hit && node != ctx->focused)
+        ctx->hit = node;
+}
+
+static LayoutNode *find_other_leaf(LayoutNode *root, LayoutNode *focused)
+{
+    struct {
+        LayoutNode *focused;
+        LayoutNode *hit;
+    } ctx = { focused, NULL };
+
+    layout_traverse_leaves(root, find_other_cb, &ctx);
+    return ctx.hit;
+}
+
+static void close_other_leaves(LayoutNode **root, LayoutNode **focused)
+{
+    if (!root || !*root || !focused || !*focused)
+        return;
+
+    int focus_id = (*focused)->id;
+
+    while (1) {
+        LayoutNode *other = find_other_leaf(*root, *focused);
+        if (!other || !other->parent)
+            break;
+
+        if (other->view && other->view->type == VIEW_PANE) {
+            pane_view_detach(other->view);
+        } else if (other->view) {
+            other->view->destroy(other->view);
+            other->view = NULL;
+        }
+
+        layout_close_leaf(other, root);
+
+        LayoutNode *refocus = layout_find_leaf_by_id(*root, focus_id);
+        if (refocus)
+            *focused = refocus;
+        else
+            *focused = layout_first_leaf(*root);
+    }
 }
 void cmd_enter(void)
 {
@@ -122,14 +176,49 @@ bool cmd_execute(LayoutNode **root, LayoutNode **focused)
         }
 
         LayoutNode *leaf = *focused;
+        if (leaf && leaf->view && leaf->view->type != VIEW_PANE)
+            leaf = layout_find_view_type(*root, VIEW_PANE);
 
-        if (leaf->view->type != VIEW_WEB) {
-            leaf->view->destroy(leaf->view);
-            leaf->view = web_view_create(final_url);
+        if (!leaf || !leaf->view || leaf->view->type != VIEW_PANE)
+            return false;
+
+        WebView *attached = pane_view_get_attached(leaf->view);
+        if (attached) {
+            web_view_load_url((View *)attached, final_url);
         } else {
-            web_view_load_url(leaf->view, final_url);
+            WebView *web = (WebView *)web_view_create(final_url);
+            pane_view_attach(leaf->view, web);
         }
 
+        return true;
+    }
+    /* ---------- help ---------- */
+    if (strcmp(cmd, "help") == 0 || strcmp(cmd, "h") == 0) {
+        LayoutNode *leaf = *focused;
+        if (leaf && leaf->view && leaf->view->type != VIEW_PANE)
+            leaf = layout_find_view_type(*root, VIEW_PANE);
+        if (!leaf || !leaf->view || leaf->view->type != VIEW_PANE)
+            return false;
+
+        if (pane_view_get_attached(leaf->view))
+            pane_view_detach(leaf->view);
+
+        const char *help_url =
+            "data:text/plain,Commands:%0A"
+            ":open%20<url|query>%20-%20open%20or%20search%0A"
+            ":new%20<url|query>%20-%20open%20in%20new%20pane%0A"
+            ":only%20-%20close%20other%20panes%0A"
+            "Shift%2Bh%20-%20hide%20current%20webview%0A"
+            "TabView:%20j/k,%20counts,%20y%20attach,%20x%20close";
+
+        WebView *web = (WebView *)web_view_create(help_url);
+        pane_view_attach(leaf->view, web);
+        *focused = leaf;
+        return true;
+    }
+    /* ---------- only ---------- */
+    if (strcmp(cmd, "only") == 0) {
+        close_other_leaves(root, focused);
         return true;
     }
     //--------------------open new pane------------------
@@ -167,8 +256,8 @@ bool cmd_execute(LayoutNode **root, LayoutNode **focused)
                     encoded);
         }
 
-        new_leaf->view->destroy(new_leaf->view);
-        new_leaf->view = web_view_create(final_url);
+        WebView *web = (WebView *)web_view_create(final_url);
+        pane_view_attach(new_leaf->view, web);
 
         *focused = new_leaf;
 

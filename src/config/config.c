@@ -57,6 +57,7 @@ static Action action_from_string(const char *s)
     if (!strcmp(s, "split_vertical")) return ACTION_SPLIT_VERTICAL;
     if (!strcmp(s, "split_horizontal")) return ACTION_SPLIT_HORIZONTAL;
     if (!strcmp(s, "close_pane")) return ACTION_CLOSE_PANE;
+    if (!strcmp(s, "hide_webview")) return ACTION_HIDE_WEBVIEW;
     if (!strcmp(s, "open_webview")) return ACTION_OPEN_WEBVIEW;
     if (!strcmp(s, "enter_cmd")) return ACTION_ENTER_CMD;
     if (!strcmp(s, "web_back")) return ACTION_WEB_BACK;

@@ -11,6 +11,7 @@ SRCS := \
 	$(SRC_DIR)/core/window.c \
 	$(SRC_DIR)/core/focus.c \
 	$(SRC_DIR)/view/placeholder/placeholder_view.c \
+	$(SRC_DIR)/view/pane/pane_view.c \
 	$(SRC_DIR)/view/debug/debug_view.c \
 	$(SRC_DIR)/view/view.c \
 	$(SRC_DIR)/view/web/web_view.c \
@@ -23,7 +24,7 @@ SRCS := \
 	$(SRC_DIR)/third_party/cjson/cJSON.c\
 	$(SRC_DIR)/config/config.c
 
-CFLAGS := -Wall -Wextra -O2 -Isrc
+CFLAGS := -Wall -Wextra -O2 -Isrc -Isrc/third_party
 PKGS   := sdl2 SDL2_image SDL2_ttf gtk+-3.0 webkit2gtk-4.1
 
 CFLAGS += $(shell pkg-config --cflags $(PKGS))
