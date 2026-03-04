@@ -41,6 +41,17 @@ run: $(TARGET)
 	WEBKIT_DISABLE_COMPOSITING_MODE=1 \
 	WEBKIT_DISABLE_SANDBOX=1 \
 	./$(TARGET) $(RUN_ARGS)
-
+debug: CFLAGS := -Wall -Wextra -g -O0 -Isrc -Isrc/third_party $(shell pkg-config --cflags $(PKGS))
+debug: $(SRCS)
+	$(CC) $(SRCS) $(CFLAGS) $(LIBS) -o $(TARGET)
+	GDK_BACKEND=x11 \
+	WEBKIT_DISABLE_COMPOSITING_MODE=1 \
+	WEBKIT_DISABLE_SANDBOX=1 \
+	valgrind \
+	--leak-check=full \
+	--show-leak-kinds=all \
+	--track-origins=yes \
+	--log-file=outputs.txt \
+	./$(TARGET)
 clean:
 	rm -f $(TARGET)
