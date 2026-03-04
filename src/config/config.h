@@ -26,7 +26,7 @@ typedef enum {
     ACTION_TAB_ENTER
 } Action;
 
-void config_load(void);
+void config_load(const char *config_path);
 Action config_action_for_key(SDL_Keycode key);
 const char *config_startup_url(void);
 int config_restore_session(void);

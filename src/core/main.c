@@ -3,6 +3,7 @@
 #include "command/command_overlay.h"
 #include "config/config.h"
 #include "focus.h"
+#include "core/profile.h"
 #include <webkit2/webkit2.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
@@ -13,6 +14,7 @@
 #include <sched.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include "layout/layout.h"
@@ -151,24 +153,198 @@ static void cmd_open_webview(LayoutNode *pane,
     input_mode = INPUT_MODE_VIEW;
 }
 
+static WebKitWebContext *create_profile_web_context(const ProfilePaths *profile,
+                                                    bool *owns_web_context)
+{
+    if (owns_web_context)
+        *owns_web_context = false;
+    if (!profile)
+        return webkit_web_context_get_default();
+
+    WebKitWebsiteDataManager *manager = webkit_website_data_manager_new(
+        "base-data-directory", profile->webkit_data_dir,
+        "base-cache-directory", profile->webkit_data_dir,
+        NULL
+    );
+
+    WebKitWebContext *ctx = NULL;
+    if (manager) {
+        ctx = webkit_web_context_new_with_website_data_manager(manager);
+        g_object_unref(manager);
+        if (ctx && owns_web_context)
+            *owns_web_context = true;
+    }
+
+    if (!ctx)
+        ctx = webkit_web_context_get_default();
+
+    return ctx;
+}
+
+static void destroy_profile_web_context(WebKitWebContext **ctx,
+                                        bool *owns_web_context)
+{
+    if (!ctx || !*ctx)
+        return;
+    if (owns_web_context && *owns_web_context)
+        g_object_unref(*ctx);
+    *ctx = NULL;
+    if (owns_web_context)
+        *owns_web_context = false;
+}
+
+static void load_profile_layout(LayoutNode **root,
+                                LayoutNode **focused,
+                                LayoutNode **last_pane)
+{
+    if (!root || !focused || !last_pane)
+        return;
+
+    *root = NULL;
+    *focused = NULL;
+    *last_pane = NULL;
+
+    if (config_restore_session())
+        *root = session_load(focused);
+
+    if (!*root) {
+        *root = layout_leaf();
+        const char *url = config_startup_url();
+        if (!url)
+            url = "https://www.youtube.com";
+        WebView *web = (WebView *)web_view_create(url);
+        attach_webview_to_pane(*root, *root, web);
+        *focused = *root;
+    }
+
+    if (*focused && (*focused)->view && (*focused)->view->type == VIEW_PANE)
+        *last_pane = *focused;
+    else
+        *last_pane = layout_find_view_type(*root, VIEW_PANE);
+}
+
+static bool switch_active_profile(const char *profile_name,
+                                  ProfilePaths *active_profile,
+                                  WebKitWebContext **ctx,
+                                  bool *owns_web_context,
+                                  LayoutNode **root,
+                                  LayoutNode **focused,
+                                  LayoutNode **last_pane)
+{
+    ProfilePaths next = {0};
+    if (!profile_resolve(profile_name, &next)) {
+        SDL_Log("profile: invalid '%s'", profile_name ? profile_name : "(null)");
+        return false;
+    }
+
+    if (root && *root)
+        session_save(*root, focused ? *focused : NULL);
+
+    if (root && *root) {
+        tab_manager_destroy_all();
+        layout_destroy(*root);
+        *root = NULL;
+    } else {
+        tab_manager_destroy_all();
+    }
+
+    if (focused)
+        *focused = NULL;
+    if (last_pane)
+        *last_pane = NULL;
+
+    destroy_profile_web_context(ctx, owns_web_context);
+    *ctx = create_profile_web_context(&next, owns_web_context);
+    if (!*ctx) {
+        SDL_Log("profile: failed to initialize web context for '%s'", next.name);
+        return false;
+    }
+
+    web_view_set_context(*ctx);
+    webkit_web_context_set_favicon_database_directory(*ctx, next.webkit_data_dir);
+
+    config_load(next.config_path);
+    session_set_path(next.session_path);
+    load_profile_layout(root, focused, last_pane);
+    if (!root || !*root || !focused || !*focused) {
+        SDL_Log("profile: failed to load layout for '%s'", next.name);
+        return false;
+    }
+    session_register(*root, *focused);
+
+    if (active_profile)
+        *active_profile = next;
+
+    SDL_Log("Profile: %s", next.name);
+    SDL_Log("Config path: %s", next.config_path);
+    SDL_Log("Session path: %s", next.session_path);
+    SDL_Log("WebKit data dir: %s", next.webkit_data_dir);
+
+    return true;
+}
+
+static void overlay_profile_list(const ProfilePaths *active_profile)
+{
+    char names[64][PROFILE_NAME_MAX];
+    int count = profile_list(names, (int)(sizeof(names) / sizeof(names[0])));
+
+    char text[2048];
+    size_t pos = 0;
+    pos += (size_t)snprintf(text + pos, sizeof(text) - pos,
+                            "Profiles:");
+
+    if (count <= 0) {
+        (void)snprintf(text + pos, sizeof(text) - pos, " (none)");
+        cmd_overlay_set_info(text);
+        return;
+    }
+
+    for (int i = 0; i < count && pos < sizeof(text); i++) {
+        bool is_active = active_profile &&
+                         strcmp(names[i], active_profile->name) == 0;
+        pos += (size_t)snprintf(text + pos, sizeof(text) - pos,
+                                "\n  %s%s",
+                                names[i],
+                                is_active ? "  *" : "");
+    }
+
+    cmd_overlay_set_info(text);
+}
+
+static void overlay_current_profile(const ProfilePaths *p)
+{
+    if (!p)
+        return;
+
+    char text[2048];
+    snprintf(text, sizeof(text),
+             "Profile: %s\n"
+             "Config:  %s\n"
+             "Session: %s\n"
+             "WebKit:  %s",
+             p->name,
+             p->config_path,
+             p->session_path,
+             p->webkit_data_dir);
+
+    cmd_overlay_set_info(text);
+}
+
 
 int main(void) {
     gtk_init(NULL,NULL);
     SDL_Init(SDL_INIT_VIDEO);
-    WebKitWebContext *ctx = webkit_web_context_get_default();
-
-    const char *cache_dir = g_get_user_cache_dir();
-    char path[512];
-    snprintf(path, sizeof(path), "%s/nativeshell-favicons", cache_dir);
-    webkit_web_context_set_favicon_database_directory(ctx, path);
-
     if (TTF_Init() != 0) {
         SDL_Log("TTF init failed: %s", TTF_GetError());
     }
     cmd_overlay_init();
     pane_view_init();
     tab_view_init();
-    config_load();
+
+    ProfilePaths profile = {0};
+    WebKitWebContext *ctx = NULL;
+    bool owns_web_context = false;
+
     SDL_Cursor *cursor_we = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
     SDL_Cursor *cursor_ns = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
     SDL_Cursor *cursor_arrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
@@ -190,26 +366,23 @@ int main(void) {
     LayoutNode *root = NULL;
     LayoutNode *last_pane = NULL;
 
-    if (config_restore_session())
-        root = session_load(&focused);
-
-    if (!root) {
-        root = layout_leaf();
-        const char *url = config_startup_url();
-        if (!url)
-            url = "https://www.youtube.com";
-        WebView *web = (WebView *)web_view_create(url);
-        attach_webview_to_pane(root, root, web);
-        focused = root;
+    if (!switch_active_profile("default",
+                               &profile,
+                               &ctx,
+                               &owns_web_context,
+                               &root,
+                               &focused,
+                               &last_pane))
+    {
+        fprintf(stderr, "Failed to load default profile\n");
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_Quit();
+        return 1;
     }
 
-    if (focused && focused->view && focused->view->type == VIEW_PANE)
-        last_pane = focused;
-    else
-        last_pane = layout_find_view_type(root, VIEW_PANE);
     bool running = true;
     SDL_Event e;
-    session_register(root,focused); 
     while (running) {
 
         session_autosave_tick();
@@ -370,6 +543,41 @@ int main(void) {
 
                 if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_RETURN) {
                     if (cmd_execute(&root, &focused)) {
+                        bool stay = false;
+
+                        if (cmd_take_profiles_list_request()) {
+                            overlay_profile_list(&profile);
+                            cmd_reset_buffer();
+                            stay = true;
+                        }
+
+                        if (cmd_take_profile_show_request()) {
+                            overlay_current_profile(&profile);
+                            cmd_reset_buffer();
+                            stay = true;
+                        }
+
+                        if (stay)
+                            continue;
+
+                        const char *requested_profile = cmd_take_profile_switch();
+                        if (requested_profile) {
+                            if (!switch_active_profile(requested_profile,
+                                                       &profile,
+                                                       &ctx,
+                                                       &owns_web_context,
+                                                       &root,
+                                                       &focused,
+                                                       &last_pane))
+                            {
+                                SDL_Log("profile: switch failed for '%s'",
+                                        requested_profile);
+                            }
+                            input_mode = INPUT_MODE_WM;
+                            cmd_exit();
+                            continue;
+                        }
+
                         if (focused && focused->view &&
                             focused->view->type == VIEW_PANE &&
                             pane_attached(focused))
@@ -658,9 +866,11 @@ int main(void) {
     session_save(root,focused);
     tab_manager_destroy_all();
     layout_destroy(root);
+    destroy_profile_web_context(&ctx, &owns_web_context);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_Quit();
+    return 0;
 }
 
 static bool is_text_key(SDL_Keycode sym)

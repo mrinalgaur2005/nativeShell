@@ -10,24 +10,45 @@
 #include <SDL2/SDL_log.h>
 #include <SDL2/SDL_render.h>
 #include <SDL2/SDL_stdinc.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <webkit2/webkit2.h>
 #include <stdlib.h>
+#include <string.h>
 
+static WebKitWebContext *g_web_context = NULL;
 
 static guint sdl_key_to_gdk(SDL_KeyCode key);
 static void web_view_ensure_surface(WebView *wv, int w, int h);
 static void web_view_ensure_texture(WebView *wv,SDL_Renderer *renderer);
 static GdkDevice *get_pointer_device(GtkWidget *widget);
 static GdkDevice *get_keyboard_device(GtkWidget *widget);
+static void web_view_show_error_page(WebView *wv,
+                                     const char *heading,
+                                     const char *message,
+                                     const char *url,
+                                     const char *details);
+static int web_view_normalize_url(const char *raw,
+                                  char *out,
+                                  size_t out_sz);
+static void web_view_load_checked(WebView *wv, const char *url);
+static void web_view_set_url_copy(WebView *wv, const char *url);
+static char *html_escape(const char *src);
 
-static void on_title_changed(WebKitWebView *wk,
-                             GParamSpec *pspec,
-                             gpointer userdata);
 static void on_load_changed(WebKitWebView *wk,
                             WebKitLoadEvent ev,
                             gpointer userdata);
+static gboolean on_load_failed(WebKitWebView *wk,
+                               WebKitLoadEvent event,
+                               gchar *failing_uri,
+                               GError *error,
+                               gpointer user_data);
 static guint guess_hardware_keycode(guint keyval);
+void web_view_set_context(WebKitWebContext *ctx)
+{
+    g_web_context = ctx;
+}
+
 
 
 
@@ -67,6 +88,52 @@ on_load_changed(WebKitWebView *wk,
     }
 }
 
+static gboolean
+on_load_failed(WebKitWebView *wk,
+               WebKitLoadEvent event,
+               gchar *failing_uri,
+               GError *error,
+               gpointer user_data)
+{
+    (void)wk;
+    (void)event;
+
+    WebView *wv = (WebView *)user_data;
+    if (!wv)
+        return FALSE;
+
+    if (error &&
+        g_error_matches(error,
+                        WEBKIT_NETWORK_ERROR,
+                        WEBKIT_NETWORK_ERROR_CANCELLED))
+    {
+        return FALSE;
+    }
+
+    const char *uri = failing_uri ? failing_uri : (wv->url ? wv->url : "");
+    const char *details = (error && error->message)
+        ? error->message
+        : "Unknown WebKit error";
+
+    SDL_Log("[web] load failed uri=%s error=%s",
+            uri[0] ? uri : "(empty)",
+            details);
+
+    tab_manager_set_loading(wv, 0);
+    tab_manager_set_title(wv, "Load error");
+    tab_manager_set_url(wv, uri);
+
+    web_view_show_error_page(
+        wv,
+        "Couldn't load this page",
+        "The page could not be loaded. Check the address and try again.",
+        uri,
+        details
+    );
+
+    return TRUE;
+}
+
 
 static void draw(View *v,
                  SDL_Renderer *renderer,
@@ -79,6 +146,9 @@ static void draw(View *v,
     web_view_ensure_surface(wv, rect.w, rect.h);
 
     gtk_widget_set_size_request(wv->offscreen, rect.w, rect.h);
+
+    GtkAllocation alloc = { 0, 0, rect.w, rect.h };
+    gtk_widget_size_allocate(wv->offscreen, &alloc);
 
     while (gtk_events_pending()) {
         gtk_main_iteration();
@@ -105,11 +175,7 @@ static void draw(View *v,
             );
 
     SDL_RenderCopy(renderer, wv->texture, NULL, &rect);
-
-    if (focused) {
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-        SDL_RenderDrawRect(renderer, &rect);
-    }
+    (void)focused;
 }
 
 static void web_view_ensure_texture(WebView *wv,SDL_Renderer *renderer){
@@ -164,35 +230,63 @@ static void destroy(View *v)
     if (wv->url)
         free(wv->url);
 
-    if (wv->wk)
-        g_object_unref(wv->wk);
     tab_manager_remove(wv);
-    webkit_web_view_stop_loading(wv->wk);
-    gtk_widget_destroy(GTK_WIDGET(wv->wk));
+
+    if (wv->wk) {
+        webkit_web_view_stop_loading(wv->wk);
+        gtk_widget_destroy(GTK_WIDGET(wv->wk));
+        wv->wk = NULL;
+    }
+    if (wv->offscreen) {
+        gtk_widget_destroy(wv->offscreen);
+        wv->offscreen = NULL;
+    }
+    if (wv->texture) {
+        SDL_DestroyTexture(wv->texture);
+        wv->texture = NULL;
+    }
+    if (wv->cr) {
+        cairo_destroy(wv->cr);
+        wv->cr = NULL;
+    }
+    if (wv->surface) {
+        cairo_surface_destroy(wv->surface);
+        wv->surface = NULL;
+    }
+
     free(wv);
 }
 
 View *web_view_create(const char *url)
 {
     WebView *wv = calloc(1, sizeof(WebView));
+    if (!wv)
+        return NULL;
 
     wv->base.type = VIEW_WEB;
     wv->base.draw = draw;
     wv->base.destroy = destroy;
 
-    wv->url = strdup(url);
+    web_view_set_url_copy(wv, url ? url : "");
 
     /* ---- GTK objects FIRST ---- */
     wv->offscreen = gtk_offscreen_window_new();
     gtk_widget_set_size_request(wv->offscreen, 800, 600);
 
-    wv->wk = WEBKIT_WEB_VIEW(webkit_web_view_new());
+    if (g_web_context)
+        wv->wk = WEBKIT_WEB_VIEW(webkit_web_view_new_with_context(g_web_context));
+    else
+        wv->wk = WEBKIT_WEB_VIEW(webkit_web_view_new());
+    if (!wv->offscreen || !wv->wk) {
+        destroy((View *)wv);
+        return NULL;
+    }
     gtk_container_add(GTK_CONTAINER(wv->offscreen),
                       GTK_WIDGET(wv->wk));
     gtk_widget_show_all(wv->offscreen);
 
     /* ---- registry AFTER wk exists ---- */
-    tab_manager_add(wv, url);
+    tab_manager_add(wv, wv->url ? wv->url : "");
     /* ---- NOW connect signals ---- */
     g_signal_connect(
             wv->wk,
@@ -200,9 +294,15 @@ View *web_view_create(const char *url)
             G_CALLBACK(on_load_changed),
             wv
             );
+    g_signal_connect(
+            wv->wk,
+            "load-failed",
+            G_CALLBACK(on_load_failed),
+            wv
+            );
 
     /* ---- load ---- */
-    webkit_web_view_load_uri(wv->wk, url);
+    web_view_load_checked(wv, wv->url);
 
     return (View *)wv;
 }
@@ -238,14 +338,11 @@ static void web_view_ensure_surface(WebView *wv, int w, int h)
 
 void web_view_load_url(View *v, const char *url)
 {
+    if (!v || v->type != VIEW_WEB)
+        return;
+
     WebView *wv = (WebView *)v;
-
-    if (wv->url)
-        free(wv->url);
-
-    wv->url = strdup(url);
-    tab_manager_set_url(wv, url);
-    webkit_web_view_load_uri(wv->wk, url);
+    web_view_load_checked(wv, url);
 }
 
 //dont alter handels key typing
@@ -479,16 +576,258 @@ void web_view_stop(View *v){
 }
 void web_view_close(View *v)
 {
-    WebView *wv = (WebView *)v;
-    if (!wv) return;
+    if (!v)
+        return;
+    destroy(v);
+}
 
-    tab_manager_remove(wv);
+static int web_view_has_scheme(const char *url)
+{
+    if (!url || !*url)
+        return 0;
 
-    webkit_web_view_stop_loading(wv->wk);
+    const char *colon = strchr(url, ':');
+    if (!colon || colon == url)
+        return 0;
 
-    gtk_widget_destroy(GTK_WIDGET(wv->wk));
-    gtk_widget_destroy(wv->offscreen);
+    if (!isalpha((unsigned char)url[0]))
+        return 0;
 
-    free(wv->url);
-    free(wv);
+    for (const char *p = url + 1; p < colon; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (!isalnum(c) && c != '+' && c != '-' && c != '.')
+            return 0;
+    }
+
+    return 1;
+}
+
+static int web_view_has_spaces_or_controls(const char *url)
+{
+    for (const unsigned char *p = (const unsigned char *)url; *p; p++) {
+        if (isspace(*p) || iscntrl(*p))
+            return 1;
+    }
+    return 0;
+}
+
+static int web_view_looks_like_host(const char *url)
+{
+    if (!url || !*url)
+        return 0;
+
+    if (strncmp(url, "localhost", 9) == 0)
+        return 1;
+
+    return strchr(url, '.') != NULL;
+}
+
+static int web_view_normalize_url(const char *raw,
+                                  char *out,
+                                  size_t out_sz)
+{
+    if (!out || out_sz == 0)
+        return 0;
+    out[0] = '\0';
+
+    if (!raw)
+        return 0;
+
+    while (*raw && isspace((unsigned char)*raw))
+        raw++;
+
+    size_t len = strlen(raw);
+    while (len > 0 && isspace((unsigned char)raw[len - 1]))
+        len--;
+
+    if (len == 0 || len >= 1024)
+        return 0;
+
+    char trimmed[1024];
+    memcpy(trimmed, raw, len);
+    trimmed[len] = '\0';
+
+    if (web_view_has_spaces_or_controls(trimmed))
+        return 0;
+
+    if (web_view_has_scheme(trimmed)) {
+        if (len >= out_sz)
+            return 0;
+        memcpy(out, trimmed, len + 1);
+        return 1;
+    }
+
+    if (!web_view_looks_like_host(trimmed))
+        return 0;
+
+    int wrote = snprintf(out, out_sz, "https://%s", trimmed);
+    return wrote > 0 && (size_t)wrote < out_sz;
+}
+
+static void web_view_set_url_copy(WebView *wv, const char *url)
+{
+    if (!wv)
+        return;
+
+    char *copy = strdup(url ? url : "");
+    if (!copy)
+        return;
+
+    if (wv->url)
+        free(wv->url);
+    wv->url = copy;
+}
+
+static char *html_escape(const char *src)
+{
+    if (!src)
+        src = "";
+
+    size_t out_len = 0;
+    for (const char *p = src; *p; p++) {
+        switch (*p) {
+            case '&': out_len += 5; break;   /* &amp; */
+            case '<': out_len += 4; break;   /* &lt; */
+            case '>': out_len += 4; break;   /* &gt; */
+            case '"': out_len += 6; break;   /* &quot; */
+            case '\'': out_len += 5; break;  /* &#39; */
+            default: out_len += 1; break;
+        }
+    }
+
+    char *out = malloc(out_len + 1);
+    if (!out)
+        return NULL;
+
+    char *dst = out;
+    for (const char *p = src; *p; p++) {
+        switch (*p) {
+            case '&':
+                memcpy(dst, "&amp;", 5);
+                dst += 5;
+                break;
+            case '<':
+                memcpy(dst, "&lt;", 4);
+                dst += 4;
+                break;
+            case '>':
+                memcpy(dst, "&gt;", 4);
+                dst += 4;
+                break;
+            case '"':
+                memcpy(dst, "&quot;", 6);
+                dst += 6;
+                break;
+            case '\'':
+                memcpy(dst, "&#39;", 5);
+                dst += 5;
+                break;
+            default:
+                *dst++ = *p;
+                break;
+        }
+    }
+    *dst = '\0';
+
+    return out;
+}
+
+static void web_view_show_error_page(WebView *wv,
+                                     const char *heading,
+                                     const char *message,
+                                     const char *url,
+                                     const char *details)
+{
+    if (!wv || !wv->wk)
+        return;
+
+    char *esc_heading = html_escape(heading ? heading : "Load error");
+    char *esc_message = html_escape(message ? message : "Unknown error");
+    char *esc_url = html_escape(url ? url : "(none)");
+    char *esc_details = html_escape(details ? details : "No details");
+
+    if (!esc_heading || !esc_message || !esc_url || !esc_details) {
+        free(esc_heading);
+        free(esc_message);
+        free(esc_url);
+        free(esc_details);
+        return;
+    }
+
+    const char *tpl =
+        "<!doctype html>"
+        "<html><head><meta charset=\"utf-8\">"
+        "<title>Load error</title>"
+        "<style>"
+        "body{font-family:sans-serif;background:#15171a;color:#e4e7ec;"
+        "margin:0;padding:24px;}"
+        ".card{max-width:760px;margin:0 auto;background:#20242b;"
+        "border:1px solid #2d3440;border-radius:10px;padding:18px;}"
+        "h1{margin:0 0 10px 0;font-size:22px;}"
+        "p{margin:8px 0;line-height:1.45;}"
+        "code{display:block;padding:10px;background:#0f1217;border-radius:6px;"
+        "border:1px solid #2a313c;white-space:pre-wrap;word-break:break-word;}"
+        "</style></head><body>"
+        "<div class=\"card\">"
+        "<h1>%s</h1>"
+        "<p>%s</p>"
+        "<p><strong>URL</strong></p><code>%s</code>"
+        "<p><strong>Details</strong></p><code>%s</code>"
+        "</div></body></html>";
+
+    int needed = snprintf(NULL, 0, tpl,
+                          esc_heading, esc_message, esc_url, esc_details);
+    if (needed <= 0) {
+        free(esc_heading);
+        free(esc_message);
+        free(esc_url);
+        free(esc_details);
+        return;
+    }
+
+    char *html = malloc((size_t)needed + 1);
+    if (!html) {
+        free(esc_heading);
+        free(esc_message);
+        free(esc_url);
+        free(esc_details);
+        return;
+    }
+
+    snprintf(html, (size_t)needed + 1, tpl,
+             esc_heading, esc_message, esc_url, esc_details);
+    webkit_web_view_load_html(wv->wk, html, NULL);
+
+    free(html);
+    free(esc_heading);
+    free(esc_message);
+    free(esc_url);
+    free(esc_details);
+}
+
+static void web_view_load_checked(WebView *wv, const char *url)
+{
+    if (!wv || !wv->wk)
+        return;
+
+    char normalized[1024];
+    if (!web_view_normalize_url(url, normalized, sizeof(normalized))) {
+        const char *bad = url ? url : "";
+        web_view_set_url_copy(wv, bad);
+        tab_manager_set_loading(wv, 0);
+        tab_manager_set_title(wv, "Invalid URL");
+        tab_manager_set_url(wv, bad);
+        web_view_show_error_page(
+            wv,
+            "Invalid URL",
+            "The address is not a valid URL. Use a full URL like https://example.com.",
+            bad[0] ? bad : "(empty)",
+            "Missing scheme or invalid URL format"
+        );
+        return;
+    }
+
+    web_view_set_url_copy(wv, normalized);
+    tab_manager_set_url(wv, normalized);
+    webkit_web_view_load_uri(wv->wk, normalized);
 }

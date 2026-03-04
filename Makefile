@@ -8,8 +8,10 @@ SRCS := \
 	$(SRC_DIR)/core/main.c \
 	$(SRC_DIR)/layout/layout.c \
 	$(SRC_DIR)/render/render.c \
+	$(SRC_DIR)/render/render_fx.c \
 	$(SRC_DIR)/core/window.c \
 	$(SRC_DIR)/core/focus.c \
+	$(SRC_DIR)/core/profile.c \
 	$(SRC_DIR)/view/placeholder/placeholder_view.c \
 	$(SRC_DIR)/view/pane/pane_view.c \
 	$(SRC_DIR)/view/debug/debug_view.c \
@@ -26,6 +28,7 @@ SRCS := \
 
 CFLAGS := -Wall -Wextra -O2 -Isrc -Isrc/third_party
 PKGS   := sdl2 SDL2_image SDL2_ttf gtk+-3.0 webkit2gtk-4.1
+RUN_ARGS ?=
 
 CFLAGS += $(shell pkg-config --cflags $(PKGS))
 LIBS   := $(shell pkg-config --libs $(PKGS))
@@ -37,7 +40,7 @@ run: $(TARGET)
 	GDK_BACKEND=x11 \
 	WEBKIT_DISABLE_COMPOSITING_MODE=1 \
 	WEBKIT_DISABLE_SANDBOX=1 \
-	./$(TARGET)
+	./$(TARGET) $(RUN_ARGS)
 
 clean:
 	rm -f $(TARGET)

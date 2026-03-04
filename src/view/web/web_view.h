@@ -4,6 +4,7 @@
 #include "gtk/gtk.h"
 
 typedef struct _WebKitWebView WebKitWebView;
+typedef struct _WebKitWebContext WebKitWebContext;
 
 typedef struct {
     View base;
@@ -19,6 +20,7 @@ typedef struct {
 } WebView;
 
 View *web_view_create(const char *url);
+void web_view_set_context(WebKitWebContext *ctx);
 
 const char *web_view_get_title(View *v);
 const char *web_view_get_url(View *v);

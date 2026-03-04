@@ -4,11 +4,13 @@
 #include <webkit2/webkit2.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 static TabManager g_tabs = {0};
 static SDL_Renderer *g_renderer = NULL;
 
 static SDL_Texture *cairo_to_texture(cairo_surface_t *s);
+static void copy_str(char *dst, size_t dst_sz, const char *src);
 
 static void ensure_capacity(int needed)
 {
@@ -115,6 +117,19 @@ cairo_to_texture(cairo_surface_t *s)
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
 
     return tex;
+}
+
+static void copy_str(char *dst, size_t dst_sz, const char *src)
+{
+    if (!dst || dst_sz == 0)
+        return;
+
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+
+    snprintf(dst, dst_sz, "%s", src);
 }
 
 /* ---------- favicon async ---------- */
@@ -238,7 +253,7 @@ int tab_manager_add(WebView *web, const char *url)
     TabEntry *e = &g_tabs.entries[g_tabs.count];
     memset(e, 0, sizeof(*e));
     if (url)
-        strncpy(e->url, url, sizeof(e->url) - 1);
+        copy_str(e->url, sizeof(e->url), url);
     e->loading = 1;
 
     g_tabs.count++;
@@ -300,7 +315,7 @@ void tab_manager_set_title(WebView *web, const char *title)
         return;
 
     TabEntry *e = &g_tabs.entries[idx];
-    strncpy(e->title, title, sizeof(e->title) - 1);
+    copy_str(e->title, sizeof(e->title), title);
 }
 
 void tab_manager_set_url(WebView *web, const char *url)
@@ -310,7 +325,7 @@ void tab_manager_set_url(WebView *web, const char *url)
         return;
 
     TabEntry *e = &g_tabs.entries[idx];
-    strncpy(e->url, url, sizeof(e->url) - 1);
+    copy_str(e->url, sizeof(e->url), url);
 }
 
 void tab_manager_set_loading(WebView *web, int loading)
